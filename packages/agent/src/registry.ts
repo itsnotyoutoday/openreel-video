@@ -325,6 +325,12 @@ import type {
 } from "./host";
 import type { JSONSchema, ToolDef, ToolDomain, ToolResult } from "./types";
 import {
+  configureBuiltinLookup,
+  extendTool,
+  getHostTool,
+  listHostTools,
+} from "./tool-extensions";
+import {
   serializeEditorState,
   listMedia,
   listTracks,
@@ -32163,13 +32169,16 @@ const TOOLS: RegisteredTool[] = [
 
 // ---- Registry --------------------------------------------------------------
 const REGISTRY = new Map<string, RegisteredTool>(TOOLS.map((t) => [t.name, t]));
+configureBuiltinLookup((name) => REGISTRY.has(name));
 
+/** Look up a tool, built-in or registered by a host, with schema extensions applied. */
 export function getTool(name: string): RegisteredTool | undefined {
-  return REGISTRY.get(name);
+  const tool = REGISTRY.get(name) ?? getHostTool(name);
+  return tool && extendTool(tool);
 }
 
 export function listTools(): RegisteredTool[] {
-  return [...REGISTRY.values()];
+  return [...REGISTRY.values(), ...listHostTools()].map((tool) => extendTool(tool));
 }
 
 export function toolDefs(): ToolDef[] {

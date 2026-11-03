@@ -20,3 +20,9 @@ export {
   StorageConflictError,
   createMemoryStorageProvider,
 } from "@openreel/core";
+export type {
+  HostToolDefinition,
+  ToolSchemaExtension,
+  EditingHost,
+  ToolResult,
+} from "@openreel/agent";

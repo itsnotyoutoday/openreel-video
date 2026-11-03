@@ -1,4 +1,8 @@
 import type {
+  HostToolDefinition,
+  ToolSchemaExtension,
+} from "@openreel/agent";
+import type {
   Project,
   ProjectSettings,
   SaveProjectResult,
@@ -38,6 +42,10 @@ export interface EditorHostOptions {
    * the editor loads at runtime (workers, wasm, fonts) resolve against it.
    */
   readonly basePath?: string;
+  /** Tools the in-editor agent may call; removed again on unmount. */
+  readonly tools?: readonly HostToolDefinition[];
+  /** Extra arguments for existing tools, keyed by tool name. */
+  readonly toolExtensions?: Readonly<Record<string, ToolSchemaExtension>>;
   /** Open this stored project on mount; otherwise a new project is created. */
   readonly projectId?: string;
   /** Settings for the new project when `projectId` is not given. */
@@ -61,6 +69,12 @@ export interface MountedEditor {
   saveProject(): Promise<SaveProjectResult>;
   /** The open project, including title and graphics clips. */
   getProject(): Project;
+  /** Register another agent tool; returns a function that removes it. */
+  addTool(tool: HostToolDefinition): () => void;
+  /** Remove an agent tool registered by this editor. */
+  removeTool(name: string): boolean;
+  /** Extend an existing tool's arguments; returns a function that undoes it. */
+  extendTool(toolName: string, extension: ToolSchemaExtension): () => void;
   /** Import a file into the open project's media library. */
   importFile(file: File): Promise<void>;
   /** Fetch an asset from `media.resolve` and import it. */

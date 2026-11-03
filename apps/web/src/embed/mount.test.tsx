@@ -16,6 +16,7 @@ vi.mock("../components/editor/ScriptViewDialog", () => ({
   ScriptViewDialog: () => <div data-testid="script-dialog" />,
 }));
 
+import { getTool, listTools } from "@openreel/agent";
 import { mountEditor } from "./mount";
 import { useUIStore } from "../stores/ui-store";
 import { getHostRuntime } from "./host-runtime";
@@ -158,5 +159,53 @@ describe("mountEditor", () => {
     await flush();
     expect(useUIStore.getState().activeModal).toBe("search");
     await act(async () => { useUIStore.getState().closeModal(); });
+  });
+
+  it("registers host tools for the agent and removes them on unmount", async () => {
+    const baseline = listTools().length;
+    const tool = {
+      name: "host_ping",
+      description: "Ping",
+      inputSchema: { type: "object" },
+      handler: () => ({ ok: true, summary: "pong" }),
+    };
+    setup({ tools: [tool] });
+    await flush();
+    expect(getTool("host_ping")).toBeDefined();
+    expect(listTools()).toHaveLength(baseline + 1);
+
+    await act(async () => { editor!.unmount(); });
+    expect(getTool("host_ping")).toBeUndefined();
+    expect(listTools()).toHaveLength(baseline);
+  });
+
+  it("adds, extends and removes tools through the handle", async () => {
+    setup();
+    await flush();
+    const remove = editor!.addTool({
+      name: "host_late",
+      description: "Late",
+      inputSchema: { type: "object" },
+      handler: () => ({ ok: true, summary: "late" }),
+    });
+    expect(getTool("host_late")).toBeDefined();
+    const undo = editor!.extendTool("host_late", { properties: { x: { type: "number" } } });
+    expect((getTool("host_late")!.inputSchema.properties as Record<string, unknown>).x).toEqual({ type: "number" });
+    undo();
+    expect(editor!.removeTool("host_late")).toBe(true);
+    expect(editor!.removeTool("list_clips")).toBe(false);
+    expect(getTool("host_late")).toBeUndefined();
+    remove();
+  });
+
+  it("does not render and leaves no tools behind when a tool definition is invalid", () => {
+    container = document.createElement("div");
+    const baseline = listTools().length;
+    const good = { name: "host_good", description: "g", inputSchema: {}, handler: () => ({ ok: true, summary: "g" }) };
+    expect(() =>
+      mountEditor(container!, { tools: [good, { ...good, name: "bad name" }] }),
+    ).toThrow(/Invalid tool name/);
+    expect(listTools()).toHaveLength(baseline);
+    expect(container.childElementCount).toBe(0);
   });
 });

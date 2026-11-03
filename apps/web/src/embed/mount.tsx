@@ -1,5 +1,12 @@
 import { StrictMode, Suspense, lazy, useEffect, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  extendToolSchema,
+  registerTool,
+  unregisterTool,
+  type HostToolDefinition,
+  type ToolSchemaExtension,
+} from "@openreel/agent";
 import { AstryxProvider } from "../components/astryx/AstryxProvider";
 import { EditorInterface } from "../components/editor/EditorInterface";
 import { autoSaveManager } from "../services/auto-save";
@@ -119,6 +126,30 @@ export function mountEditor(
     );
   }
 
+  // Register agent tools first: a bad definition throws before anything is
+  // rendered, and the tools registered so far are removed again.
+  const toolRemovers: Array<() => void> = [];
+  const ownedTools = new Set<string>();
+  const addTool = (tool: HostToolDefinition): (() => void) => {
+    const remove = registerTool(tool);
+    ownedTools.add(tool.name);
+    const undo = () => {
+      ownedTools.delete(tool.name);
+      remove();
+    };
+    toolRemovers.push(undo);
+    return undo;
+  };
+  try {
+    for (const tool of options.tools ?? []) addTool(tool);
+    for (const [name, extension] of Object.entries(options.toolExtensions ?? {})) {
+      toolRemovers.push(extendToolSchema(name, extension));
+    }
+  } catch (error) {
+    toolRemovers.splice(0).reverse().forEach((remove) => remove());
+    throw error;
+  }
+
   const element = document.createElement("div");
   element.setAttribute("data-openreel-root", "");
   element.style.cssText = "width:100%;height:100%;position:relative;outline:none;";
@@ -151,6 +182,7 @@ export function mountEditor(
       unmounted = true;
       root.unmount();
       element.remove();
+      toolRemovers.splice(0).reverse().forEach((remove) => remove());
       disposeProjectAutoSave();
       autoSaveManager.stop();
       useTimelineStore.getState().stop();
@@ -167,6 +199,17 @@ export function mountEditor(
       void Promise.resolve(provider?.dispose?.()).catch((error: unknown) => {
         console.error("[OpenReel] Storage dispose failed:", error);
       });
+    },
+    addTool,
+    removeTool(name) {
+      if (!ownedTools.has(name)) return false;
+      ownedTools.delete(name);
+      return unregisterTool(name);
+    },
+    extendTool(toolName: string, extension: ToolSchemaExtension) {
+      const remove = extendToolSchema(toolName, extension);
+      toolRemovers.push(remove);
+      return remove;
     },
     openProject: openStoredProject,
     createProject: createNew,

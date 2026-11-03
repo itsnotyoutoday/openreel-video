@@ -1,5 +1,6 @@
 import { listTools } from "./registry";
 import type { RegisteredTool } from "./registry";
+import { isAlwaysAvailableHostTool } from "./tool-extensions";
 
 /** Leave headroom below provider limits for future built-in/meta tools. */
 export const DEFAULT_AGENT_TOOL_LIMIT = 120;
@@ -63,7 +64,7 @@ const words = (value: string): string[] =>
     .filter((word) => word.length >= 3);
 
 function relevance(tool: RegisteredTool, promptWords: Set<string>): number {
-  if (ALWAYS_AVAILABLE.has(tool.name)) return 10_000;
+  if (ALWAYS_AVAILABLE.has(tool.name) || isAlwaysAvailableHostTool(tool.name)) return 10_000;
   const name = new Set(words(tool.name));
   const title = new Set(words(tool.title));
   const description = new Set(words(tool.description));
@@ -99,7 +100,7 @@ export function selectToolsForPrompt(
   const promptWords = new Set(words(prompt));
 
   const candidates = listTools().filter((tool) => {
-    if (ALWAYS_AVAILABLE.has(tool.name) || prior.has(tool.name)) return true;
+    if (ALWAYS_AVAILABLE.has(tool.name) || isAlwaysAvailableHostTool(tool.name) || prior.has(tool.name)) return true;
     if (!wantsMotion && !wantsCreation) return tool.domain !== "motion";
     if (wantsCreation && isCreationTool(tool)) return true;
     if (wantsMotion && tool.domain === "motion" && !isCreationTool(tool)) return true;

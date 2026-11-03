@@ -13,6 +13,7 @@ import { runExclusive } from "../services/agent/host-singleton";
 import { makeDirectBYOKClient, validateAIEndpoint } from "../services/agent/direct-llm-transport";
 import { EditingSession } from "../services/agent/editing-session";
 import { editingToolDefs, editingToolReadOnly, executeEditingTool, EDITING_SYSTEM } from "../services/agent/editing-tools";
+import { executeWithHostTools, hostToolReadOnly, withHostTools } from "../services/agent/host-tools";
 import { useAIConnectionStore } from "./ai-connection-store";
 import {
   conversationTitle,
@@ -269,7 +270,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ status: "error", error: error instanceof Error ? error.message : "Invalid connection settings", abortController: null });
       return;
     }
-    const tools = editingToolDefs(provider === "anthropic" ? "anthropic" : "openai");
+    const toolProvider = provider === "anthropic" ? "anthropic" : "openai";
+    const tools = withHostTools(editingToolDefs(toolProvider), toolProvider);
     const autoConfirm = useSettingsStore.getState().agentAutoConfirm;
     const dryRun = useSettingsStore.getState().agentDryRun;
 
@@ -281,8 +283,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         tools,
         system: EDITING_SYSTEM,
         messages: get().conversation,
-        execute: executeEditingTool,
-        readOnly: editingToolReadOnly,
+        execute: (name, args, session) => executeWithHostTools(name, args, session, executeEditingTool),
+        readOnly: (name) => hostToolReadOnly(name, editingToolReadOnly),
         atomic: true,
         signal: controller.signal,
         dryRun,

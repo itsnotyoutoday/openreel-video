@@ -13,6 +13,21 @@ export {
   toCapabilityDoc,
 } from "./registry";
 export type { RegisteredTool, ToolHandler } from "./registry";
+export {
+  registerTool,
+  unregisterTool,
+  extendToolSchema,
+  isHostTool,
+  listHostTools,
+  getSchemaExtensions,
+  extensionPropertyNames,
+  applyExtensionsToSchema,
+  resetToolExtensions,
+} from "./tool-extensions";
+export type {
+  HostToolDefinition,
+  ToolSchemaExtension,
+} from "./tool-extensions";
 export { executeTool, isDestructive, isExpensive } from "./executor";
 export * from "./llm";
 export { runTurn } from "./loop";
