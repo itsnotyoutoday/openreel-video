@@ -5,6 +5,8 @@ import type { UIState } from "../stores/ui-store";
 import { useTimelineStore } from "../stores/timeline-store";
 import { keyboardShortcuts } from "../services/keyboard-shortcuts";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
+import { HostRuntimeContext, type HostRuntime } from "../embed/host-runtime";
+import type { ReactNode } from "react";
 
 const mocks = vi.hoisted(() => ({
   projectState: vi.fn(),
@@ -211,5 +213,46 @@ describe("keyboard editing commands", () => {
     press("L", { shiftKey: true });
     expect(useTimelineStore.getState().loopEnabled).toBe(false);
     view.unmount();
+  });
+});
+
+describe("keyboard shortcut scope", () => {
+  const hostWrapper = (root: HTMLElement) => ({ children }: { children: ReactNode }) => {
+    const runtime: HostRuntime = { options: {}, root };
+    return <HostRuntimeContext.Provider value={runtime}>{children}</HostRuntimeContext.Provider>;
+  };
+
+  it("an embedded editor ignores keys pressed outside its root (a stray 't' adds no title)", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const view = renderHook(useKeyboardShortcuts, { wrapper: hostWrapper(root) });
+
+    press("t");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.insertOverlay).not.toHaveBeenCalled();
+
+    act(() => root.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true })));
+    await waitFor(() => expect(mocks.insertOverlay).toHaveBeenCalledOnce());
+    view.unmount();
+    root.remove();
+  });
+
+  it("the standalone app (no host runtime) still reacts to window-level keys", async () => {
+    const view = renderHook(useKeyboardShortcuts);
+    press("t");
+    await waitFor(() => expect(mocks.insertOverlay).toHaveBeenCalledOnce());
+    view.unmount();
+  });
+
+  it("clears the scope on unmount", () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const view = renderHook(useKeyboardShortcuts, { wrapper: hostWrapper(root) });
+    view.unmount();
+    const standalone = renderHook(useKeyboardShortcuts);
+    press("t");
+    expect(mocks.insertOverlay).toHaveBeenCalledOnce();
+    standalone.unmount();
+    root.remove();
   });
 });

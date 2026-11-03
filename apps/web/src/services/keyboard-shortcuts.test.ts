@@ -165,3 +165,54 @@ describe("shortcut initialization", () => {
     localStorage.removeItem("openreel_shortcuts");
   });
 });
+
+describe("scoped keyboard shortcuts", () => {
+  afterEach(() => keyboardShortcuts.setScope(null));
+
+  it("by default reacts to key events anywhere on the window", () => {
+    const handler = listen("tools.addText");
+    const outside = document.createElement("div");
+    document.body.appendChild(outside);
+    press("t", {}, outside);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("with a scope only reacts to events originating inside the scope element", () => {
+    const handler = listen("tools.addText");
+    const root = document.createElement("div");
+    const inside = document.createElement("div");
+    const outside = document.createElement("div");
+    root.appendChild(inside);
+    document.body.append(root, outside);
+    keyboardShortcuts.setScope(root);
+
+    press("t", {}, outside);
+    press("t");
+    expect(handler).not.toHaveBeenCalled();
+
+    press("t", {}, inside);
+    press("t", {}, root);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns to window-wide listening when the scope is cleared, without duplicate listeners", () => {
+    const handler = listen("tools.addText");
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    keyboardShortcuts.setScope(root);
+    keyboardShortcuts.setScope(null);
+
+    press("t");
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening on the scope element when listening stops", () => {
+    const handler = listen("tools.addText");
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    keyboardShortcuts.setScope(root);
+    keyboardShortcuts.stopListening();
+    press("t", {}, root);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});

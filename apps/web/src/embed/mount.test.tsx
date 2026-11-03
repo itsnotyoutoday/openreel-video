@@ -9,7 +9,15 @@ vi.mock("../components/editor/EditorInterface", () => ({
   EditorInterface: () => <div data-testid="editor-interface">editor</div>,
 }));
 
+vi.mock("../components/editor/SearchModal", () => ({
+  SearchModal: () => <div data-testid="search-modal" />,
+}));
+vi.mock("../components/editor/ScriptViewDialog", () => ({
+  ScriptViewDialog: () => <div data-testid="script-dialog" />,
+}));
+
 import { mountEditor } from "./mount";
+import { useUIStore } from "../stores/ui-store";
 import { getHostRuntime } from "./host-runtime";
 import { useProjectStore } from "../stores/project-store";
 import {
@@ -128,5 +136,27 @@ describe("mountEditor", () => {
     setup();
     await flush();
     await expect(editor!.importAsset("x")).rejects.toThrow(/No media source/);
+  });
+
+  it("makes the root focusable and focuses it so scoped shortcuts receive keys", async () => {
+    setup();
+    await flush();
+    expect(editor!.root.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(editor!.root);
+  });
+
+  it("opens search with Ctrl+K pressed inside the editor but not elsewhere", async () => {
+    setup();
+    await flush();
+    const press = (target: EventTarget) =>
+      act(() => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })); });
+
+    press(window);
+    expect(useUIStore.getState().activeModal).toBeNull();
+
+    press(editor!.root);
+    await flush();
+    expect(useUIStore.getState().activeModal).toBe("search");
+    await act(async () => { useUIStore.getState().closeModal(); });
   });
 });

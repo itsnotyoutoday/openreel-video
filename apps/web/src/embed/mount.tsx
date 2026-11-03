@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState, type ReactElement } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { AstryxProvider } from "../components/astryx/AstryxProvider";
 import { EditorInterface } from "../components/editor/EditorInterface";
@@ -23,6 +23,13 @@ import {
 } from "./host-runtime";
 import type { EditorHostOptions, MountedEditor } from "./types";
 
+const SearchModal = lazy(() =>
+  import("../components/editor/SearchModal").then((m) => ({ default: m.SearchModal })),
+);
+const ScriptViewDialog = lazy(() =>
+  import("../components/editor/ScriptViewDialog").then((m) => ({ default: m.ScriptViewDialog })),
+);
+
 let mounted: MountedEditor | null = null;
 
 async function openStoredProject(id: string): Promise<void> {
@@ -46,6 +53,20 @@ function EmbeddedEditor({
   onError: (error: unknown) => void;
 }): ReactElement | null {
   const [ready, setReady] = useState(false);
+  const activeModal = useUIStore((state) => state.activeModal);
+  const closeModal = useUIStore((state) => state.closeModal);
+
+  // Ctrl/Cmd+K opens search, but only for keys pressed inside the editor.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault();
+        useUIStore.getState().openModal("search");
+      }
+    };
+    runtime.root.addEventListener("keydown", onKeyDown);
+    return () => runtime.root.removeEventListener("keydown", onKeyDown);
+  }, [runtime]);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +91,16 @@ function EmbeddedEditor({
     };
   }, [runtime, onError]);
 
-  return ready ? <EditorInterface /> : null;
+  if (!ready) return null;
+  return (
+    <>
+      <EditorInterface />
+      <Suspense fallback={null}>
+        {activeModal === "scriptView" && <ScriptViewDialog isOpen onClose={closeModal} />}
+        {activeModal === "search" && <SearchModal isOpen onClose={closeModal} />}
+      </Suspense>
+    </>
+  );
 }
 
 /**
@@ -91,7 +121,10 @@ export function mountEditor(
 
   const element = document.createElement("div");
   element.setAttribute("data-openreel-root", "");
-  element.style.cssText = "width:100%;height:100%;position:relative;";
+  element.style.cssText = "width:100%;height:100%;position:relative;outline:none;";
+  // Focusable so keyboard shortcuts (scoped to this element) receive key events
+  // after a click anywhere in the editor.
+  element.tabIndex = -1;
   container.appendChild(element);
 
   const runtime: HostRuntime = { options, root: element };
@@ -99,6 +132,7 @@ export function mountEditor(
   if (options.storage) setStorageProvider(options.storage);
 
   const root = createRoot(element);
+  element.focus({ preventScroll: true });
   root.render(
     <StrictMode>
       <HostRuntimeContext.Provider value={runtime}>

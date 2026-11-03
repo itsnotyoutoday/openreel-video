@@ -22,9 +22,13 @@ import {
 } from "../utils/timeline-item-actions";
 import { stepEditingFrame, editingFrameStepSeconds } from "../components/editor/editing-frame-rate";
 import { resolvePlaybackLoop } from "../utils/playback-loop";
+import { useHostRuntime } from "../embed/host-runtime";
 
 export function useKeyboardShortcuts() {
   const [showShortcutsOverlay, setShowShortcutsOverlay] = useState(false);
+  // An embedded editor only reacts to keys pressed inside its own root; the
+  // standalone app has no host runtime and keeps listening on the window.
+  const scopeElement = useHostRuntime()?.root ?? null;
 
   useEffect(() => {
     // Read live state when a command runs. Subscribing this hook to the entire
@@ -252,12 +256,14 @@ export function useKeyboardShortcuts() {
       }],
     ];
     const unsubscribes = handlers.map(([action, handler]) => keyboardShortcuts.registerHandler(action, handler));
+    keyboardShortcuts.setScope(scopeElement);
     keyboardShortcuts.startListening();
     return () => {
       unsubscribes.forEach((unsubscribe) => unsubscribe());
       keyboardShortcuts.stopListening();
+      keyboardShortcuts.setScope(null);
     };
-  }, []);
+  }, [scopeElement]);
 
   return { showShortcutsOverlay, setShowShortcutsOverlay };
 }

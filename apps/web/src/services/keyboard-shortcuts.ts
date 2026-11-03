@@ -561,6 +561,7 @@ class KeyboardShortcutsManager {
   private handlers: Map<string, Set<ShortcutHandler>> = new Map();
   private activePreset: string = "openreel";
   private isListening: boolean = false;
+  private scope: HTMLElement | null = null;
 
   constructor() {
     this.loadShortcuts();
@@ -615,16 +616,33 @@ class KeyboardShortcutsManager {
     } catch { /* Keep the preset active for this session. */ }
   }
 
+  /**
+   * Restrict shortcuts to key events that originate inside `element` (usually
+   * the editor root of an embedded editor). `null` returns to listening on the
+   * whole window, which is what the standalone app does.
+   */
+  setScope(element: HTMLElement | null): void {
+    if (this.scope === element) return;
+    const wasListening = this.isListening;
+    if (wasListening) this.stopListening();
+    this.scope = element;
+    if (wasListening) this.startListening();
+  }
+
+  private listenTarget(): Window | HTMLElement {
+    return this.scope ?? window;
+  }
+
   startListening(): void {
     if (this.isListening) return;
     this.isListening = true;
-    window.addEventListener("keydown", this.handleKeyDown);
+    (this.listenTarget() as Window).addEventListener("keydown", this.handleKeyDown);
   }
 
   stopListening(): void {
     if (!this.isListening) return;
     this.isListening = false;
-    window.removeEventListener("keydown", this.handleKeyDown);
+    (this.listenTarget() as Window).removeEventListener("keydown", this.handleKeyDown);
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
