@@ -1,6 +1,18 @@
-import type { Project, ProjectSettings } from "@openreel/core";
+import type {
+  NativeFileRef,
+  Project,
+  ProjectSettings,
+  RecentProjectRecord,
+  RecentProjectStore,
+} from "@openreel/core";
 import { normalizeProjectStoredFields } from "@openreel/core";
 import { v4 as uuidv4 } from "uuid";
+import {
+  getRecentStore,
+  getStorageProvider,
+  hasHostStorageProvider,
+} from "./storage/storage-context";
+import { saveProjectToProvider } from "./storage/project-persistence";
 
 interface FilePickerAcceptType {
   description: string;
@@ -31,7 +43,6 @@ interface FileHandleWithPermissions extends FileSystemFileHandle {
   requestPermission?: (options: { mode: string }) => Promise<string>;
 }
 
-type NativeFileRef = { kind: "native"; path: string };
 type ProjectFileRef = FileSystemFileHandle | NativeFileRef;
 
 function isDesktopFs(): boolean {
@@ -46,21 +57,9 @@ function isNativeRef(ref: unknown): ref is NativeFileRef {
   );
 }
 
-const PROJECT_DB_NAME = "openreel-projects";
-const PROJECT_DB_VERSION = 1;
-const PROJECTS_STORE = "projects";
-const RECENT_STORE = "recent";
 const MAX_RECENT_PROJECTS = 10;
 
-export interface RecentProject {
-  id: string;
-  name: string;
-  lastOpened: number;
-  thumbnail?: string;
-  fileHandle?: ProjectFileRef;
-  duration?: number;
-  trackCount?: number;
-}
+export type RecentProject = RecentProjectRecord;
 
 export interface ProjectTemplate {
   id: string;
@@ -180,7 +179,7 @@ type ProjectManagerEvent = "recentUpdated" | "projectSaved" | "projectOpened";
 type EventCallback = (data?: unknown) => void;
 
 class ProjectManager {
-  private db: IDBDatabase | null = null;
+  private initializedStore: RecentProjectStore | null = null;
   private listeners: Map<ProjectManagerEvent, Set<EventCallback>> = new Map();
   private currentFileHandle: ProjectFileRef | null = null;
 
@@ -218,37 +217,15 @@ class ProjectManager {
   }
 
   async initialize(): Promise<void> {
-    this.db = await this.openDatabase();
+    const store = getRecentStore();
+    await store.init?.();
+    this.initializedStore = store;
   }
 
-  private openDatabase(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-      if (typeof indexedDB === "undefined") {
-        reject(new Error("IndexedDB not supported"));
-        return;
-      }
-
-      const request = indexedDB.open(PROJECT_DB_NAME, PROJECT_DB_VERSION);
-
-      request.onerror = () => {
-        reject(new Error(`Failed to open database: ${request.error?.message}`));
-      };
-
-      request.onsuccess = () => resolve(request.result);
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        if (!db.objectStoreNames.contains(PROJECTS_STORE)) {
-          db.createObjectStore(PROJECTS_STORE, { keyPath: "id" });
-        }
-
-        if (!db.objectStoreNames.contains(RECENT_STORE)) {
-          const store = db.createObjectStore(RECENT_STORE, { keyPath: "id" });
-          store.createIndex("lastOpened", "lastOpened", { unique: false });
-        }
-      };
-    });
+  /** The recent store once initialized, else null (calls then no-op). */
+  private readyStore(): RecentProjectStore | null {
+    const store = getRecentStore();
+    return this.initializedStore === store ? store : null;
   }
 
   async createProject(
@@ -309,6 +286,14 @@ class ProjectManager {
   }
 
   async saveProject(project: Project): Promise<boolean> {
+    if (hasHostStorageProvider()) {
+      // A host owns persistence: save through its storage provider instead of
+      // asking the user for a file.
+      await saveProjectToProvider(project);
+      await this.addToRecent(project);
+      this.emit("projectSaved", { project });
+      return true;
+    }
     if (this.currentFileHandle) {
       return this.saveToFileHandle(project, this.currentFileHandle);
     }
@@ -546,57 +531,38 @@ class ProjectManager {
   }
 
   private async loadProjectFromDb(id: string): Promise<Project | null> {
-    if (!this.db) return null;
-
-    return new Promise((resolve) => {
-      const tx = this.db!.transaction(PROJECTS_STORE, "readonly");
-      const store = tx.objectStore(PROJECTS_STORE);
-      const request = store.get(id);
-
-      request.onsuccess = () => {
-        const project = request.result as Project | undefined;
-        if (project) {
-          this.emit("projectOpened", { project });
-        }
-        resolve(project || null);
-      };
-
-      request.onerror = () => resolve(null);
-    });
+    try {
+      const loaded = await getStorageProvider().loadProject(id);
+      if (loaded) {
+        this.emit("projectOpened", { project: loaded.project });
+      }
+      return loaded?.project ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async getRecentProjects(): Promise<RecentProject[]> {
-    if (!this.db) {
+    if (!this.readyStore()) {
       await this.initialize();
     }
 
-    return new Promise((resolve) => {
-      if (!this.db) {
-        resolve([]);
-        return;
-      }
-
-      const tx = this.db.transaction(RECENT_STORE, "readonly");
-      const store = tx.objectStore(RECENT_STORE);
-      const index = store.index("lastOpened");
-      const request = index.getAll();
-
-      request.onsuccess = () => {
-        const items = (request.result as RecentProject[])
-          .sort((a, b) => b.lastOpened - a.lastOpened)
-          .slice(0, MAX_RECENT_PROJECTS);
-        resolve(items);
-      };
-
-      request.onerror = () => resolve([]);
-    });
+    try {
+      const items = await getRecentStore().list();
+      return items
+        .sort((a, b) => b.lastOpened - a.lastOpened)
+        .slice(0, MAX_RECENT_PROJECTS);
+    } catch {
+      return [];
+    }
   }
 
   async addToRecent(
     project: Project,
     fileHandle?: ProjectFileRef,
   ): Promise<void> {
-    if (!this.db) return;
+    const store = this.readyStore();
+    if (!store) return;
 
     const recentProject: RecentProject = {
       id: project.id,
@@ -607,57 +573,39 @@ class ProjectManager {
       trackCount: project.timeline.tracks.length,
     };
 
-    return new Promise((resolve) => {
-      const tx = this.db!.transaction(RECENT_STORE, "readwrite");
-      const store = tx.objectStore(RECENT_STORE);
-      store.put(recentProject);
-
-      tx.oncomplete = () => {
-        this.emit("recentUpdated");
-        this.cleanupOldRecent();
-        resolve();
-      };
-
-      tx.onerror = () => resolve();
-    });
+    try {
+      await store.put(recentProject);
+    } catch {
+      return;
+    }
+    this.emit("recentUpdated");
+    void this.cleanupOldRecent();
   }
 
   private async updateRecentTimestamp(id: string): Promise<void> {
-    if (!this.db) return;
+    const store = this.readyStore();
+    if (!store) return;
 
-    return new Promise((resolve) => {
-      const tx = this.db!.transaction(RECENT_STORE, "readwrite");
-      const store = tx.objectStore(RECENT_STORE);
-      const request = store.get(id);
-
-      request.onsuccess = () => {
-        const recent = request.result as RecentProject | undefined;
-        if (recent) {
-          recent.lastOpened = Date.now();
-          store.put(recent);
-        }
-        resolve();
-      };
-
-      request.onerror = () => resolve();
-    });
+    try {
+      const recent = await store.get(id);
+      if (recent) {
+        await store.put({ ...recent, lastOpened: Date.now() });
+      }
+    } catch {
+      // The recent list is best-effort.
+    }
   }
 
   async removeFromRecent(id: string): Promise<void> {
-    if (!this.db) return;
+    const store = this.readyStore();
+    if (!store) return;
 
-    return new Promise((resolve) => {
-      const tx = this.db!.transaction(RECENT_STORE, "readwrite");
-      const store = tx.objectStore(RECENT_STORE);
-      store.delete(id);
-
-      tx.oncomplete = () => {
-        this.emit("recentUpdated");
-        resolve();
-      };
-
-      tx.onerror = () => resolve();
-    });
+    try {
+      await store.remove(id);
+    } catch {
+      return;
+    }
+    this.emit("recentUpdated");
   }
 
   private async cleanupOldRecent(): Promise<void> {
@@ -671,20 +619,15 @@ class ProjectManager {
   }
 
   async clearRecentProjects(): Promise<void> {
-    if (!this.db) return;
+    const store = this.readyStore();
+    if (!store) return;
 
-    return new Promise((resolve) => {
-      const tx = this.db!.transaction(RECENT_STORE, "readwrite");
-      const store = tx.objectStore(RECENT_STORE);
-      store.clear();
-
-      tx.oncomplete = () => {
-        this.emit("recentUpdated");
-        resolve();
-      };
-
-      tx.onerror = () => resolve();
-    });
+    try {
+      await store.clear();
+    } catch {
+      return;
+    }
+    this.emit("recentUpdated");
   }
 
   getTemplates(): ProjectTemplate[] {

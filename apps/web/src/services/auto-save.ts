@@ -1,4 +1,5 @@
-import type { Project } from "@openreel/core";
+import type { Project, SnapshotRecord, SnapshotStore } from "@openreel/core";
+import { getSnapshotStore } from "./storage/storage-context";
 
 export interface AutoSaveConfig {
   interval: number;
@@ -16,14 +17,7 @@ export interface AutoSaveMetadata {
   isRecovery: boolean;
 }
 
-interface AutoSaveRecord {
-  id: string;
-  projectId: string;
-  projectName: string;
-  timestamp: number;
-  slot: number;
-  data: string;
-}
+type AutoSaveRecord = SnapshotRecord;
 
 const DEFAULT_CONFIG: AutoSaveConfig = {
   interval: 30000, // 30 seconds
@@ -32,11 +26,12 @@ const DEFAULT_CONFIG: AutoSaveConfig = {
   debounceTime: 2000, // 2 seconds
 };
 
-const AUTO_SAVE_DB_NAME = "openreel-autosave";
-const AUTO_SAVE_DB_VERSION = 1;
-const AUTO_SAVE_STORE = "autosaves";
-
-export function serializeProjectForAutoSave(project: Project): string {
+/**
+ * A project copy that is safe to serialize: binary media, file handles,
+ * waveforms and object-URL thumbnails are dropped (media travels separately,
+ * keyed by media id).
+ */
+export function stripProjectForStorage(project: Project): Project {
   const mediaItems = project.mediaLibrary.items.map((item) => ({
     ...item,
     blob: null,
@@ -48,13 +43,17 @@ export function serializeProjectForAutoSave(project: Project): string {
     filmstripThumbnails: undefined,
   }));
 
-  return JSON.stringify({
+  return {
     ...project,
     mediaLibrary: {
       ...project.mediaLibrary,
       items: mediaItems,
     },
-  });
+  };
+}
+
+export function serializeProjectForAutoSave(project: Project): string {
+  return JSON.stringify(stripProjectForStorage(project));
 }
 
 type AutoSaveEventType = "saved" | "restored" | "error" | "recoveryAvailable";
@@ -62,7 +61,8 @@ type AutoSaveEventCallback = (data?: unknown) => void;
 
 export class AutoSaveManager {
   private config: AutoSaveConfig;
-  private db: IDBDatabase | null = null;
+  private store: SnapshotStore | null = null;
+  private ready = false;
   private initializationPromise: Promise<void> | null = null;
   private savePromise: Promise<void> | null = null;
   private intervalId: ReturnType<typeof setInterval> | null = null;
@@ -91,84 +91,42 @@ export class AutoSaveManager {
     this.config.maxSlots = Math.max(1, Math.floor(this.config.maxSlots) || 1);
   }
 
+  /** The active snapshot store; switching providers re-initializes. */
+  private currentStore(): SnapshotStore {
+    const store = getSnapshotStore();
+    if (this.store !== store) {
+      this.store = store;
+      this.ready = false;
+      this.initializationPromise = null;
+    }
+    return store;
+  }
+
   isInitialized(): boolean {
-    return this.db !== null;
+    this.currentStore();
+    return this.ready;
   }
 
   async initialize(): Promise<void> {
-    if (this.db) return;
+    const store = this.currentStore();
+    if (this.ready) return;
     if (this.initializationPromise) return this.initializationPromise;
 
-    this.initializationPromise = this.openDatabase()
-      .then((db) => {
-        this.db = db;
-        db.onversionchange = () => {
-          db.close();
-          if (this.db === db) this.db = null;
-        };
-        db.onclose = () => { if (this.db === db) this.db = null; };
+    const initialization = Promise.resolve(store.init?.())
+      .then(() => {
+        if (this.store === store) this.ready = true;
       })
       .catch((error) => {
         console.error("[AutoSave] Failed to initialize:", error);
         this.emit("error", { error, message: "Failed to initialize auto-save" });
       })
       .finally(() => {
-        this.initializationPromise = null;
-      });
-    return this.initializationPromise;
-  }
-
-  private async createTransaction(mode: "readonly" | "readwrite"): Promise<IDBTransaction> {
-    await this.initialize();
-    const db = this.db;
-    if (!db) throw new Error("Database not initialized");
-    try {
-      return db.transaction(AUTO_SAVE_STORE, mode);
-    } catch (error) {
-      // Safari can close a connection while a file chooser/background tab is open.
-      // No transaction began, so reconnecting once cannot repeat a committed write.
-      if (!(error instanceof DOMException) || error.name !== "InvalidStateError") throw error;
-      if (this.db === db) this.db = null;
-      await this.initialize();
-      if (!this.db) throw error;
-      return this.db.transaction(AUTO_SAVE_STORE, mode);
-    }
-  }
-
-  private openDatabase(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-      if (typeof indexedDB === "undefined") {
-        reject(new Error("IndexedDB not supported"));
-        return;
-      }
-
-      const request = indexedDB.open(AUTO_SAVE_DB_NAME, AUTO_SAVE_DB_VERSION);
-
-      request.onerror = () => {
-        reject(
-          new Error(
-            `Failed to open auto-save database: ${request.error?.message}`,
-          ),
-        );
-      };
-
-      request.onsuccess = () => {
-        resolve(request.result);
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        if (!db.objectStoreNames.contains(AUTO_SAVE_STORE)) {
-          const store = db.createObjectStore(AUTO_SAVE_STORE, {
-            keyPath: "id",
-          });
-          store.createIndex("projectId", "projectId", { unique: false });
-          store.createIndex("timestamp", "timestamp", { unique: false });
-          store.createIndex("slot", "slot", { unique: false });
+        if (this.initializationPromise === initialization) {
+          this.initializationPromise = null;
         }
-      };
-    });
+      });
+    this.initializationPromise = initialization;
+    return initialization;
   }
 
   start(getProject: () => Project): void {
@@ -282,8 +240,8 @@ export class AutoSaveManager {
   }
 
   private async save(project: Project, data: string): Promise<void> {
-    if (!this.db) await this.initialize();
-    if (!this.db) {
+    if (!this.isInitialized()) await this.initialize();
+    if (!this.isInitialized()) {
       throw new Error("Auto-save database not initialized");
     }
 
@@ -308,87 +266,27 @@ export class AutoSaveManager {
   }
 
   private async saveRecord(record: AutoSaveRecord): Promise<void> {
-    const tx = await this.createTransaction("readwrite");
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error("Database not initialized"));
-        return;
-      }
-
-      const store = tx.objectStore(AUTO_SAVE_STORE);
-      const request = store.put(record);
-
-      // A successful request is still provisional until its transaction commits.
-      // Keep retention in this transaction and read keys only, avoiding copies
-      // of every large project snapshot on every auto-save.
-      const retainedIds = new Set(
-        Array.from({ length: this.config.maxSlots }, (_, slot) =>
-          `${record.projectId}-slot-${slot}`,
-        ),
-      );
-      const keys = store.index("projectId").getAllKeys(record.projectId);
-      keys.onsuccess = () => {
-        for (const id of keys.result) {
-          if (!retainedIds.has(String(id))) store.delete(id);
-        }
-      };
-      tx.oncomplete = () => resolve();
-      tx.onabort = () => reject(tx.error ?? new Error("Auto-save transaction aborted"));
-      tx.onerror = () => reject(tx.error ?? new Error("Auto-save transaction failed"));
-      request.onerror = () =>
-        reject(new Error(`Failed to save: ${request.error?.message}`));
-      keys.onerror = () => reject(keys.error ?? new Error("Failed to prune auto-saves"));
-    });
+    await this.initialize();
+    await this.currentStore().put(record, this.config.maxSlots);
   }
 
   private async deleteRecord(id: string): Promise<void> {
-    const tx = await this.createTransaction("readwrite");
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error("Database not initialized"));
-        return;
-      }
-
-      const store = tx.objectStore(AUTO_SAVE_STORE);
-      const request = store.delete(id);
-
-      tx.oncomplete = () => resolve();
-      tx.onabort = () => reject(tx.error ?? new Error("Auto-save delete aborted"));
-      tx.onerror = () => reject(tx.error ?? new Error("Auto-save delete failed"));
-      request.onerror = () =>
-        reject(new Error(`Failed to delete: ${request.error?.message}`));
-    });
+    await this.initialize();
+    await this.currentStore().delete(id);
   }
 
-  private async getAllSaves(): Promise<AutoSaveRecord[]> {
-    const tx = await this.createTransaction("readonly");
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error("Database not initialized"));
-        return;
-      }
-
-      const store = tx.objectStore(AUTO_SAVE_STORE);
-      const request = store.getAll();
-
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () =>
-        reject(new Error(`Failed to get saves: ${request.error?.message}`));
-    });
+  private async getAllSaves(projectId?: string): Promise<AutoSaveRecord[]> {
+    await this.initialize();
+    return this.currentStore().list(projectId);
   }
 
   async checkForRecovery(projectId?: string): Promise<AutoSaveMetadata[]> {
-    if (!this.db) {
+    if (!this.isInitialized()) {
       await this.initialize();
     }
 
     try {
-      const allSaves = await this.getAllSaves();
-
-      let saves = allSaves;
-      if (projectId) {
-        saves = allSaves.filter((s) => s.projectId === projectId);
-      }
+      const saves = await this.getAllSaves(projectId);
 
       const metadata: AutoSaveMetadata[] = saves
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -413,7 +311,7 @@ export class AutoSaveManager {
   }
 
   async recover(saveId: string): Promise<Project | null> {
-    if (!this.db) {
+    if (!this.isInitialized()) {
       await this.initialize();
     }
 
@@ -436,20 +334,8 @@ export class AutoSaveManager {
   }
 
   private async getRecord(id: string): Promise<AutoSaveRecord | null> {
-    const tx = await this.createTransaction("readonly");
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error("Database not initialized"));
-        return;
-      }
-
-      const store = tx.objectStore(AUTO_SAVE_STORE);
-      const request = store.get(id);
-
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () =>
-        reject(new Error(`Failed to get record: ${request.error?.message}`));
-    });
+    await this.initialize();
+    return this.currentStore().get(id);
   }
 
   async getMostRecentSave(projectId: string): Promise<AutoSaveMetadata | null> {
@@ -458,10 +344,9 @@ export class AutoSaveManager {
   }
 
   async clearProjectSaves(projectId: string): Promise<void> {
-    if (!this.db) return;
+    if (!this.isInitialized()) return;
 
-    const allSaves = await this.getAllSaves();
-    const projectSaves = allSaves.filter((s) => s.projectId === projectId);
+    const projectSaves = await this.getAllSaves(projectId);
 
     for (const save of projectSaves) {
       await this.deleteRecord(save.id);
@@ -469,19 +354,9 @@ export class AutoSaveManager {
   }
 
   async clearAllSaves(): Promise<void> {
-    if (!this.db) return;
+    if (!this.isInitialized()) return;
 
-    const tx = await this.createTransaction("readwrite");
-    return new Promise((resolve, reject) => {
-      const store = tx.objectStore(AUTO_SAVE_STORE);
-      const request = store.clear();
-
-      tx.oncomplete = () => resolve();
-      tx.onabort = () => reject(tx.error ?? new Error("Clearing auto-saves aborted"));
-      tx.onerror = () => reject(tx.error ?? new Error("Clearing auto-saves failed"));
-      request.onerror = () =>
-        reject(new Error(`Failed to clear: ${request.error?.message}`));
-    });
+    await this.currentStore().clear();
   }
 
   updateConfig(config: Partial<AutoSaveConfig>): void {
@@ -538,10 +413,9 @@ export class AutoSaveManager {
 
   destroy(): void {
     this.stop();
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
+    this.store?.close?.();
+    this.store = null;
+    this.ready = false;
     this.listeners.clear();
   }
 }
