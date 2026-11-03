@@ -5,8 +5,42 @@ agent tools and (see the sections below) theme and events. Nothing here is
 specific to one host. With no options the standalone app behaves exactly as it
 always did.
 
+## Library build
+
+```sh
+pnpm --filter @openreel/web build:lib
+```
+
+writes `apps/web/dist-lib/`:
+
+| File | What |
+| --- | --- |
+| `openreel-editor.js` + `chunks/`, `assets/` | ESM entry and lazy chunks, workers and wasm. React is bundled, so the host only needs the files. All URLs are relative to the bundle. |
+| `openreel-editor.css` | Tailwind and Astryx styles. Design tokens are declared on `[data-openreel-root]` instead of `:root`, and `html`/`body` rules are removed (`vite-plugins/scope-root-css.ts`). Tailwind's preflight and Astryx's reset still apply page-wide, as they do for any Tailwind app. |
+| `fonts/` | Files the 3D text renderer loads through `assetUrl()`; serve them at `basePath`. |
+| `types/` | Declarations (`apps/web/dist-lib/types/apps/web/src/embed/index.d.ts`). They import `@openreel/core` and `@openreel/agent`; map those to `dist-lib/types/packages/*/src/index.d.ts` in the consumer's `tsconfig` `paths`. |
+
+`@openreel/web` exposes them as `@openreel/web/embed` and
+`@openreel/web/embed.css`. Load the Inter font yourself (the standalone app
+does it from `index.html`).
+
+## Try it: the harness
+
+`apps/web/harness/` is a plain page with a fake host (in-memory storage with
+every call recorded, generated audio and image assets, a host tool, event
+logging) that mounts the library build and exercises each hook:
+
+```sh
+pnpm --filter @openreel/web build:lib
+PREFIX=/tools/editor PORT=5199 pnpm --filter @openreel/web harness   # http://localhost:5199/tools/editor/
+pnpm --filter @openreel/web test:e2e                                # Playwright smoke, Chromium and WebKit
+```
+
+## Usage
+
 ```ts
 import { mountEditor } from "@openreel/web/embed";
+import "@openreel/web/embed.css";
 
 const editor = mountEditor(document.getElementById("slot")!, {
   storage, // StorageProvider (optional)

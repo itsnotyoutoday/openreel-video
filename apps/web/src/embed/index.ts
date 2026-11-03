@@ -24,6 +24,14 @@ export {
   StorageConflictError,
   createMemoryStorageProvider,
 } from "@openreel/core";
+export {
+  registerTool,
+  unregisterTool,
+  extendToolSchema,
+  executeTool,
+  getTool,
+  listTools,
+} from "@openreel/agent";
 export type {
   HostToolDefinition,
   ToolSchemaExtension,
