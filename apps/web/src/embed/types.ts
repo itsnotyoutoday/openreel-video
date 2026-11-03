@@ -86,6 +86,11 @@ export interface EditorHostOptions {
   readonly tools?: readonly HostToolDefinition[];
   /** Extra arguments for existing tools, keyed by tool name. */
   readonly toolExtensions?: Readonly<Record<string, ToolSchemaExtension>>;
+  /**
+   * Show the first-run welcome tour. Defaults to true, as in the standalone
+   * app; a host that has its own onboarding passes false.
+   */
+  readonly onboardingTour?: boolean;
   /** Open this stored project on mount; otherwise a new project is created. */
   readonly projectId?: string;
   /** Settings for the new project when `projectId` is not given. */

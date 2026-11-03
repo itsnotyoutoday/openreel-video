@@ -52,6 +52,9 @@ const editor = mountEditor(document.getElementById("slot")!, {
 editor.unmount();
 ```
 
+`onboardingTour: false` turns off the first-run welcome tour (it is a full-screen
+overlay that blocks clicks until dismissed).
+
 `mountEditor(container, options)` renders into `container`, does not read or
 write the URL (no router), and returns a `MountedEditor`. Only one editor can be
 mounted per page: its state lives in module-level stores, so a second call

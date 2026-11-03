@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useSyncExternalStore } from "react";
 import { TOUR_STEPS, ONBOARDING_KEY } from "./tour-steps";
+import { useHostRuntime } from "../../../embed/host-runtime";
 
 interface TourState {
   isActive: boolean;
@@ -107,15 +108,17 @@ export function useTour() {
     }
   }, []);
 
+  // An embedding host can turn the first-run tour off (onboardingTour: false).
+  const tourEnabled = useHostRuntime()?.options.onboardingTour !== false;
   useEffect(() => {
     const completed = localStorage.getItem(ONBOARDING_KEY);
-    if (!completed) {
+    if (!completed && tourEnabled) {
       const timer = setTimeout(() => {
         start();
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [start]);
+  }, [start, tourEnabled]);
 
   useEffect(() => {
     if (!state.isActive) return;

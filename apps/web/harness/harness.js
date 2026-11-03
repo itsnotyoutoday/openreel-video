@@ -132,6 +132,7 @@ function mount(projectId) {
     tools: [hostTool],
     events,
     theme: { mode: "light" },
+    onboardingTour: false,
     newProject: { name: "Harness project", settings: { width: 1280, height: 720, frameRate: 30 } },
   });
   log(`mounted${projectId ? ` (stored ${projectId})` : ""}`);
