@@ -73,6 +73,21 @@ describe("volume keyframes in exported audio (rendered samples)", () => {
     expect(valueAt(out, 4)).toBeCloseTo(0.25, 2); // halfway through a 2 s fade-out
   });
 
+  it("keeps keyframe time on the timeline when the clip is retimed", async () => {
+    const retimed = createAudioProject({
+      startTime: 0,
+      duration: 4,
+      inPoint: 0,
+      outPoint: 8,
+      speed: 2,
+      pitchCorrection: false,
+      keyframes: [keyframe(0, 0), keyframe(4, 1)],
+    });
+    const out = await render(retimed, 0, 5);
+    expect(valueAt(out, 2)).toBeCloseTo(0.25, 2);
+    expect(valueAt(out, 3.9)).toBeGreaterThan(0.45);
+  });
+
   it("uses the keyframes of a linked clip when the audio is separated from the video", async () => {
     const project = createAudioProject({
       id: "audio-clip",
