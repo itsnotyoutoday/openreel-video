@@ -104,4 +104,63 @@ describe("clip audio resolution", () => {
 
     expect(resolveAudibleAudioTarget(videoClip, timeline).id).toBe(audioClip.id);
   });
+
+  it("maps volume keyframes to automation points and ignores other properties", () => {
+    const { timeline, audioClip } = createSeparatedAudioTimeline();
+    const keyed = createClip({
+      id: "keyed",
+      trackId: "audio-track",
+      keyframes: [
+        { id: "k1", time: 0, property: "volume", value: 1, easing: "linear" },
+        { id: "k2", time: 3, property: "opacity", value: 0.5, easing: "linear" },
+        { id: "k3", time: 2, property: "volume", value: 0.1, easing: "linear" },
+      ],
+    });
+
+    expect(resolveClipVolumeAutomation(keyed, timeline)).toEqual([
+      { time: 0, value: 1 },
+      { time: 2, value: 0.1 },
+    ]);
+    expect(resolveClipVolumeAutomation(audioClip, timeline)).toHaveLength(2);
+  });
+
+  it("prefers explicit automation over volume keyframes", () => {
+    const { timeline } = createSeparatedAudioTimeline();
+    const clip = createClip({
+      id: "both",
+      trackId: "audio-track",
+      automation: { volume: [{ time: 0, value: 0.5 }] },
+      keyframes: [
+        { id: "k1", time: 0, property: "volume", value: 0.9, easing: "linear" },
+      ],
+    });
+
+    expect(resolveClipVolumeAutomation(clip, timeline)).toEqual([
+      { time: 0, value: 0.5 },
+    ]);
+  });
+
+  it("falls back to volume keyframes on a linked clip", () => {
+    const { timeline, videoClip, audioClip } = createSeparatedAudioTimeline();
+    const keyedVideo: Clip = {
+      ...videoClip,
+      automation: undefined,
+      keyframes: [
+        { id: "k1", time: 0, property: "volume", value: 1, easing: "linear" },
+        { id: "k2", time: 1, property: "volume", value: 0.2, easing: "linear" },
+      ],
+    };
+    const linkedTimeline: Timeline = {
+      ...timeline,
+      tracks: [
+        createTrack({ id: "video-track", type: "video", clips: [keyedVideo] }),
+        createTrack({ id: "audio-track", type: "audio", clips: [audioClip] }),
+      ],
+    };
+
+    expect(resolveClipVolumeAutomation(audioClip, linkedTimeline)).toEqual([
+      { time: 0, value: 1 },
+      { time: 1, value: 0.2 },
+    ]);
+  });
 });
