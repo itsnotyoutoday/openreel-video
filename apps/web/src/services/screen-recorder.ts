@@ -406,13 +406,16 @@ export class ScreenRecorderService {
     const isChromium = /Chrome|Chromium|Edge/.test(navigator.userAgent);
     const isSafari =
       /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    const hasMediaRecorder = typeof MediaRecorder !== "undefined";
 
     return {
       screenCapture: !!navigator.mediaDevices?.getDisplayMedia,
       systemAudio: isChromium,
       webcam: !!navigator.mediaDevices?.getUserMedia,
-      vp9: MediaRecorder.isTypeSupported("video/webm;codecs=vp9"),
-      h264: MediaRecorder.isTypeSupported("video/webm;codecs=h264") || isSafari,
+      vp9: hasMediaRecorder && MediaRecorder.isTypeSupported("video/webm;codecs=vp9"),
+      h264:
+        (hasMediaRecorder && MediaRecorder.isTypeSupported("video/webm;codecs=h264")) ||
+        isSafari,
     };
   }
 }
