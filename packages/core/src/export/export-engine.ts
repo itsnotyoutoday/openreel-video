@@ -17,6 +17,7 @@ import {
   VIDEO_QUALITY_PRESETS,
 } from "./types";
 import { VideoEngine, getVideoEngine } from "../video/video-engine";
+import { yieldToMainThread, EXPORT_YIELD_INTERVAL_MS, EXPORT_PROGRESS_INTERVAL_MS } from "./yield-to-main";
 import { AudioEngine, getAudioEngine } from "../audio/audio-engine";
 import { titleEngine } from "../text/title-engine";
 import { graphicsEngine } from "../graphics/graphics-engine";
@@ -267,6 +268,9 @@ export class ExportEngine {
       }
 
       let renderMsTotal = 0;
+      let encodeMsTotal = 0;
+      let lastYieldAt = performance.now();
+      let lastProgressAt = lastYieldAt;
       for (let frame = 0; frame < totalFrames; frame++) {
         checkCancelled();
 
@@ -293,33 +297,42 @@ export class ExportEngine {
           frameImage = upscaled;
         }
 
+        const encodeStart = performance.now();
         await this.waitForVideoOperation(backend.addVideoFrame(
           frameImage,
           time,
           1 / fullSettings.frameRate,
         ), abortController.signal, "encoding");
+        encodeMsTotal += performance.now() - encodeStart;
 
         this.currentExport!.framesRendered = frame + 1;
 
-        if (backend.needsFrameThrottling && (frame + 1) % 5 === 0) {
-          // Yield to the browser without invalidating decoder state. Clearing
-          // these caches during a sequential export forces fresh seeks and can
-          // repeat source frames, which shows up as brief pauses in the file.
-          await new Promise((resolve) => setTimeout(resolve, 2));
+        // Hand the main thread back at a steady cadence (not every N frames) so
+        // input and paints are never starved for more than one frame's work.
+        // Yielding does not invalidate decoder state, unlike clearing caches,
+        // which forces fresh seeks and can repeat source frames.
+        const afterFrame = performance.now();
+        if (afterFrame - lastYieldAt >= EXPORT_YIELD_INTERVAL_MS) {
+          await yieldToMainThread();
+          lastYieldAt = performance.now();
         }
 
-        yield this.createProgress(
-          "rendering",
-          (frame + 1) / totalFrames,
-          totalFrames,
-          frame + 1,
-          backend.getBytesWritten(),
-        );
+        // Progress consumers re-render per event; batch them instead of one per frame.
+        if (frame + 1 === totalFrames || afterFrame - lastProgressAt >= EXPORT_PROGRESS_INTERVAL_MS) {
+          lastProgressAt = afterFrame;
+          yield this.createProgress(
+            "rendering",
+            (frame + 1) / totalFrames,
+            totalFrames,
+            frame + 1,
+            backend.getBytesWritten(),
+          );
+        }
       }
 
       if (totalFrames > 0) {
         console.info(
-          `[export] render=${(renderMsTotal / totalFrames).toFixed(1)}ms/f frames=${totalFrames}`,
+          `[export] render=${(renderMsTotal / totalFrames).toFixed(1)}ms/f encode=${(encodeMsTotal / totalFrames).toFixed(1)}ms/f frames=${totalFrames}`,
         );
       }
 

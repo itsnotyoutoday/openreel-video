@@ -92,7 +92,11 @@ vi.mock("../media/mediabunny-engine", () => ({
   getMediaEngine: vi.fn().mockReturnValue(mockMediaEngine),
 }));
 
-vi.mock("./audio-priming", () => ({ getAacEncoderPriming: vi.fn().mockResolvedValue(2112) }));
+vi.mock("./yield-to-main", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./yield-to-main")>();
+  return { ...actual, yieldToMainThread: vi.fn(actual.yieldToMainThread) };
+});
+vi.mock("./audio-priming",() => ({ getAacEncoderPriming: vi.fn().mockResolvedValue(2112) }));
 vi.mock("./mp4-audio-timing", () => ({ applyMp4AudioTiming: vi.fn((bytes) => bytes) }));
 
 vi.mock("mediabunny", () => {
@@ -181,7 +185,8 @@ import {
   VIDEO_QUALITY_PRESETS,
 } from "./types";
 import type { Project, Timeline, Track, Clip } from "../types";
-import type { ExportResult } from "./types";
+import type { ExportResult, ExportProgress } from "./types";
+import { yieldToMainThread } from "./yield-to-main";
 
 const createMockProject = (overrides?: Partial<Project>): Project => ({
   id: "test-project-id",
@@ -523,6 +528,53 @@ describe("ExportEngine", () => {
       expect(mockRenderAudio).toHaveBeenNthCalledWith(3, project, 30, 10);
       expect(mockAudioSourceAdd).toHaveBeenCalledTimes(3);
       expect(mockAudioEngine.clearCache).toHaveBeenCalled();
+    });
+
+    async function collectVideoExport(frames: number, frameRate: number): Promise<{ events: ExportProgress[]; result: ExportResult }> {
+      const duration = frames / frameRate;
+      const project = createMockProject({
+        timeline: createMockTimeline({
+          tracks: [createMockTrack({ clips: [createMockClip({ duration, outPoint: duration })] })],
+          duration,
+        }),
+      });
+      await exportEngine.initialize();
+      const generator = exportEngine.exportVideo(
+        project,
+        { ...DEFAULT_VIDEO_SETTINGS, frameRate, width: 640, height: 360 },
+        writableStream,
+      );
+      const events: ExportProgress[] = [];
+      for (;;) {
+        const { done, value } = await generator.next();
+        if (done) return { events, result: value };
+        events.push(value);
+      }
+    }
+
+    it("batches rendering progress instead of emitting one event per frame", async () => {
+      const { events, result } = await collectVideoExport(60, 30);
+      const rendering = events.filter((event) => event.phase === "rendering");
+
+      expect(result.success).toBe(true);
+      expect(rendering.length).toBeGreaterThan(0);
+      expect(rendering.length).toBeLessThan(60);
+      expect(rendering.at(-1)).toMatchObject({ currentFrame: 60, totalFrames: 60, progress: 1 });
+      expect(rendering.map((event) => event.currentFrame)).toEqual(
+        [...rendering.map((event) => event.currentFrame)].sort((a, b) => a - b),
+      );
+      expect(events.at(-1)?.phase).toBe("complete");
+    });
+
+    it("yields to the main thread while rendering slow frames", async () => {
+      mockRenderFrame.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({ image: { close: vi.fn() }, width: 640, height: 360 }), 20)),
+      );
+
+      const { result } = await collectVideoExport(5, 30);
+
+      expect(result.success).toBe(true);
+      expect(vi.mocked(yieldToMainThread).mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
     it("renders a selected range at original timeline times with output starting at zero", async () => {
