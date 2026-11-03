@@ -22,6 +22,7 @@ import {
 } from "../utils/timeline-item-actions";
 import { stepEditingFrame, editingFrameStepSeconds } from "../components/editor/editing-frame-rate";
 import { resolvePlaybackLoop } from "../utils/playback-loop";
+import { ShuttleController } from "../services/shuttle-controller";
 import { useHostRuntime } from "../embed/host-runtime";
 
 export function useKeyboardShortcuts() {
@@ -141,7 +142,35 @@ export function useKeyboardShortcuts() {
       }
     };
 
+    const shuttle = new ShuttleController({
+      getPosition: () => useTimelineStore.getState().playheadPosition,
+      seek: (seconds) => useTimelineStore.getState().seekTo(seconds),
+      getDuration: () => timelineEnd(),
+      getFrameSeconds: () => editingFrameStepSeconds(useProjectStore.getState().project.settings.frameRate),
+      play: () => useTimelineStore.getState().play(),
+      pause: () => useTimelineStore.getState().pause(),
+      setPlaybackRate: (rate) => useTimelineStore.getState().setPlaybackRate(rate),
+      now: () => performance.now(),
+      schedule: (callback) => {
+        const id = requestAnimationFrame(callback);
+        return () => cancelAnimationFrame(id);
+      },
+    });
+    // Playback started any other way (space bar, the transport buttons) ends a shuttle.
+    const stopShuttleOnPlayback = useTimelineStore.subscribe((state, previous) => {
+      if (state.playbackState !== previous.playbackState && state.playbackState === "stopped") shuttle.halt();
+    });
+    const shuttleKeys = [
+      ["playback.shuttleReverse", "j"],
+      ["playback.shuttlePause", "k"],
+      ["playback.shuttleForward", "l"],
+    ] as const;
+
     const handlers: Array<[string, ShortcutHandler]> = [
+      ...shuttleKeys.map(([action, key]): [string, ShortcutHandler] => [
+        action,
+        (event) => shuttle.press(key, event.repeat),
+      ]),
       ["playback.playPause", () => useTimelineStore.getState().togglePlayback()],
       ["playback.frameBack", () => stepFrame(-1)],
       ["playback.frameForward", () => stepFrame(1)],
@@ -256,10 +285,17 @@ export function useKeyboardShortcuts() {
       }],
     ];
     const unsubscribes = handlers.map(([action, handler]) => keyboardShortcuts.registerHandler(action, handler));
+    const releases = [
+      ...shuttleKeys.map(([action, key]) => keyboardShortcuts.registerKeyUpHandler(action, () => shuttle.release(key))),
+      keyboardShortcuts.registerBlurHandler(() => shuttle.dispose()),
+    ];
     keyboardShortcuts.setScope(scopeElement);
     keyboardShortcuts.startListening();
     return () => {
       unsubscribes.forEach((unsubscribe) => unsubscribe());
+      releases.forEach((release) => release());
+      stopShuttleOnPlayback();
+      shuttle.dispose();
       keyboardShortcuts.stopListening();
       keyboardShortcuts.setScope(null);
     };

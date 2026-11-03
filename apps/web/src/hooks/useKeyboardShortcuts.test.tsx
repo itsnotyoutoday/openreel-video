@@ -256,3 +256,70 @@ describe("keyboard shortcut scope", () => {
     root.remove();
   });
 });
+
+describe("shuttle keys in the editor", () => {
+  const key = (type: "keydown" | "keyup", name: string, repeat = false) =>
+    act(() => { window.dispatchEvent(new KeyboardEvent(type, { key: name, repeat, bubbles: true, cancelable: true })); });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useTimelineStore.setState({ playbackState: "stopped", playbackRate: 1, playheadPosition: 0 });
+  });
+
+  it("L plays at 1x then 2x, and K pauses and restores the speed", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    key("keydown", "l");
+    expect(useTimelineStore.getState()).toMatchObject({ playbackState: "playing", playbackRate: 1 });
+    key("keydown", "l");
+    expect(useTimelineStore.getState().playbackRate).toBe(2);
+    key("keydown", "k");
+    key("keyup", "k");
+    expect(useTimelineStore.getState()).toMatchObject({ playbackState: "paused", playbackRate: 1 });
+    view.unmount();
+  });
+
+  it("J moves the playhead backwards frame by frame", () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    act(() => useTimelineStore.setState({ playheadPosition: 4 }));
+    const view = renderHook(useKeyboardShortcuts);
+    key("keydown", "j");
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(useTimelineStore.getState().playheadPosition).toBeLessThan(3.8);
+    expect(useTimelineStore.getState().playbackState).not.toBe("playing");
+    key("keydown", "k");
+    const stopped = useTimelineStore.getState().playheadPosition;
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(useTimelineStore.getState().playheadPosition).toBe(stopped);
+    view.unmount();
+  });
+
+  it("with K held, a tap on L steps one frame", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    act(() => useTimelineStore.setState({ playheadPosition: 1 }));
+    key("keydown", "k");
+    key("keydown", "l");
+    key("keyup", "l");
+    expect(useTimelineStore.getState().playheadPosition).toBeCloseTo(1 + 1 / 30, 5);
+    key("keyup", "k");
+    view.unmount();
+  });
+
+  it("a shuttle in progress stops when the editor unmounts", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    key("keydown", "l");
+    view.unmount();
+    expect(useTimelineStore.getState().playbackState).toBe("paused");
+    expect(useTimelineStore.getState().playbackRate).toBe(1);
+  });
+
+  it("is inactive while typing in a text field", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true })); });
+    expect(useTimelineStore.getState().playbackState).not.toBe("playing");
+    view.unmount();
+    input.remove();
+  });
+});
+

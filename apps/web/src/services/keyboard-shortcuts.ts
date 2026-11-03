@@ -283,6 +283,36 @@ const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     enabled: true,
   },
   {
+    id: "playback.shuttleReverse",
+    name: "Shuttle Reverse (J)",
+    description: "Play in reverse; press again for 2x, 4x, 8x. With K held: frame back, hold for slow reverse",
+    category: "playback",
+    defaultKey: "j",
+    currentKey: "j",
+    action: "playback.shuttleReverse",
+    enabled: true,
+  },
+  {
+    id: "playback.shuttlePause",
+    name: "Shuttle Stop (K)",
+    description: "Stop shuttle playback. Hold K and tap J or L to step a frame",
+    category: "playback",
+    defaultKey: "k",
+    currentKey: "k",
+    action: "playback.shuttlePause",
+    enabled: true,
+  },
+  {
+    id: "playback.shuttleForward",
+    name: "Shuttle Forward (L)",
+    description: "Play forward; press again for 2x, 4x, 8x. With K held: frame forward, hold for slow forward",
+    category: "playback",
+    defaultKey: "l",
+    currentKey: "l",
+    action: "playback.shuttleForward",
+    enabled: true,
+  },
+  {
     id: "editing.undo",
     name: "Undo",
     description: "Undo last action",
@@ -559,6 +589,8 @@ const PRESETS: ShortcutPreset[] = [
 class KeyboardShortcutsManager {
   private shortcuts: Map<string, ShortcutDefinition> = new Map();
   private handlers: Map<string, Set<ShortcutHandler>> = new Map();
+  private keyUpHandlers: Map<string, Set<ShortcutHandler>> = new Map();
+  private blurHandlers: Set<() => void> = new Set();
   private activePreset: string = "openreel";
   private isListening: boolean = false;
   private scope: HTMLElement | null = null;
@@ -637,12 +669,16 @@ class KeyboardShortcutsManager {
     if (this.isListening) return;
     this.isListening = true;
     (this.listenTarget() as Window).addEventListener("keydown", this.handleKeyDown);
+    (this.listenTarget() as Window).addEventListener("keyup", this.handleKeyUp);
+    window.addEventListener("blur", this.handleBlur);
   }
 
   stopListening(): void {
     if (!this.isListening) return;
     this.isListening = false;
     (this.listenTarget() as Window).removeEventListener("keydown", this.handleKeyDown);
+    (this.listenTarget() as Window).removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("blur", this.handleBlur);
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
@@ -655,10 +691,35 @@ class KeyboardShortcutsManager {
       e.stopPropagation();
       // Holding a key may scrub/zoom continuously, but must not repeat edits,
       // toggle playback, add markers, or open dialogs repeatedly.
-      if (e.repeat && !/^(playback\.(frame|second|jump5|prevClip|nextClip)|timeline\.zoom)/.test(matchedShortcut.action)) return;
+      if (e.repeat && !/^(playback\.(frame|second|jump5|prevClip|nextClip|shuttle)|timeline\.zoom)/.test(matchedShortcut.action)) return;
       this.executeAction(matchedShortcut.action, e);
     }
   };
+
+  // Key-up is not gated on focus or modals: a key that went down must always be
+  // able to come up again, or "held" state (such as K for shuttle) would stick.
+  private handleKeyUp = (e: KeyboardEvent): void => {
+    const matched = this.findMatchingShortcut(e);
+    if (!matched) return;
+    this.keyUpHandlers.get(matched.action)?.forEach((handler) => handler(e));
+  };
+
+  private handleBlur = (): void => {
+    this.blurHandlers.forEach((handler) => handler());
+  };
+
+  /** Called when the key bound to `action` is released. */
+  registerKeyUpHandler(action: string, handler: ShortcutHandler): () => void {
+    if (!this.keyUpHandlers.has(action)) this.keyUpHandlers.set(action, new Set());
+    this.keyUpHandlers.get(action)!.add(handler);
+    return () => this.keyUpHandlers.get(action)?.delete(handler);
+  }
+
+  /** Called when the window loses focus, when key-up events can be missed. */
+  registerBlurHandler(handler: () => void): () => void {
+    this.blurHandlers.add(handler);
+    return () => this.blurHandlers.delete(handler);
+  }
 
   private findMatchingShortcut(e: KeyboardEvent): ShortcutDefinition | null {
     const isMeta = e.metaKey || e.ctrlKey;
