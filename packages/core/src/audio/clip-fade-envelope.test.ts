@@ -24,4 +24,18 @@ describe("clip fade envelopes", () => {
       { time: 3, value: 0 },
     ]);
   });
+
+  it("peaks where overlapping fades cross instead of cutting the corner", () => {
+    // A 4 s clip with 3 s fades: the ramps meet at 2 s at two thirds, not at 1/3.
+    const points = getClipFadeEnvelopePoints({ clipOffset: 0, rangeDuration: 4, clipDuration: 4, fadeIn: 3, fadeOut: 3 });
+    expect(points.map((point) => point.time)).toEqual([0, 1, 2, 3, 4]);
+    expect(points[2].value).toBeCloseTo(2 / 3, 5);
+    expect(points[0].value).toBe(0);
+    expect(points[4].value).toBe(0);
+  });
+
+  it("does not add a crossing point outside the requested range", () => {
+    const points = getClipFadeEnvelopePoints({ clipOffset: 3, rangeDuration: 1, clipDuration: 4, fadeIn: 3, fadeOut: 3 });
+    expect(points.map((point) => point.time)).toEqual([0, 1]);
+  });
 });
