@@ -643,6 +643,20 @@ function motionCompositionsEqual(
 let autoSaveInitialized = false;
 let autoSaveInitializationPromise: Promise<void> | null = null;
 let autoSaveNotificationsInitialized = false;
+let autoSaveTeardown: Array<() => void> = [];
+
+/**
+ * Undo everything {@link ProjectState.initializeAutoSave} set up (interval,
+ * listeners, store subscriptions) so an embedded editor can unmount cleanly and
+ * a later mount starts from scratch.
+ */
+export function disposeProjectAutoSave(): void {
+  autoSaveTeardown.forEach((teardown) => teardown());
+  autoSaveTeardown = [];
+  autoSaveManager.stop();
+  autoSaveInitialized = false;
+  autoSaveNotificationsInitialized = false;
+}
 
 /**
  * Create the project store
@@ -2978,7 +2992,7 @@ export const useProjectStore = create<ProjectState>()(
           if (!autoSaveNotificationsInitialized) {
             autoSaveNotificationsInitialized = true;
             let failureNotificationId: string | null = null;
-            autoSaveManager.on("error", () => {
+            const onAutoSaveError = () => {
               if (failureNotificationId) return;
               failureNotificationId = useNotificationStore.getState().addNotification({
                 type: "warning",
@@ -2986,13 +3000,19 @@ export const useProjectStore = create<ProjectState>()(
                 message: "Your edits are still in this tab. Save a project copy and keep the original media files before closing it.",
                 duration: 0,
               });
-            });
-            autoSaveManager.on("saved", () => {
+            };
+            const onAutoSaveSaved = () => {
               if (failureNotificationId) {
                 useNotificationStore.getState().removeNotification(failureNotificationId);
                 failureNotificationId = null;
               }
-            });
+            };
+            autoSaveManager.on("error", onAutoSaveError);
+            autoSaveManager.on("saved", onAutoSaveSaved);
+            autoSaveTeardown.push(
+              () => autoSaveManager.off("error", onAutoSaveError),
+              () => autoSaveManager.off("saved", onAutoSaveSaved),
+            );
           }
           await initializeAutoSave();
           if (!autoSaveManager.isInitialized()) return;
@@ -3004,14 +3024,16 @@ export const useProjectStore = create<ProjectState>()(
             });
           };
           applyAutoSaveSettings();
-          useSettingsStore.subscribe((state, previous) => {
-            if (
-              state.autoSave !== previous.autoSave ||
-              state.autoSaveInterval !== previous.autoSaveInterval
-            ) {
-              applyAutoSaveSettings();
-            }
-          });
+          autoSaveTeardown.push(
+            useSettingsStore.subscribe((state, previous) => {
+              if (
+                state.autoSave !== previous.autoSave ||
+                state.autoSaveInterval !== previous.autoSaveInterval
+              ) {
+                applyAutoSaveSettings();
+              }
+            }),
+          );
           autoSaveManager.start(() => {
             const { project } = get();
             const titleEngine = useEngineStore.getState().getTitleEngine();
@@ -3029,11 +3051,13 @@ export const useProjectStore = create<ProjectState>()(
           // Subscribe to project state changes to mark as dirty for auto-save
           // Uses Zustand's subscribeWithSelector middleware to detect changes to project object only
           // Trigger auto-save when any project field changes (timeline, media, settings, etc.)
-          useProjectStore.subscribe(
-            (state) => state.project,
-            () => {
-              autoSaveManager.markDirty(get().getFullProject());
-            },
+          autoSaveTeardown.push(
+            useProjectStore.subscribe(
+              (state) => state.project,
+              () => {
+                autoSaveManager.markDirty(get().getFullProject());
+              },
+            ),
           );
           autoSaveInitialized = true;
         };

@@ -23,6 +23,7 @@ import { useUIStore } from "../../stores/ui-store";
 import { useThemeStore } from "../../stores/theme-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useRouter } from "../../hooks/use-router";
+import { useIsEmbedded } from "../../embed/host-runtime";
 import {
   startTour,
   ONBOARDING_KEY,
@@ -60,6 +61,7 @@ export const EditorActionRail: React.FC = () => {
   const { mode: themeMode, toggleTheme } = useThemeStore();
   const { openSettings } = useSettingsStore();
   const { navigate } = useRouter();
+  const embedded = useIsEmbedded();
 
   const themeLabel =
     themeMode === "auto"
@@ -83,17 +85,21 @@ export const EditorActionRail: React.FC = () => {
       aria-label="Editor tools"
       className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-bg-1 py-3"
     >
-      <Tooltip content="Back to home" placement="end">
-        <IconButton
-          label="Back to home"
-          icon={<House size={16} aria-hidden />}
-          size="sm"
-          variant="ghost"
-          onClick={() => navigate("welcome")}
-        />
-      </Tooltip>
+      {!embedded && (
+        <>
+          <Tooltip content="Back to home" placement="end">
+            <IconButton
+              label="Back to home"
+              icon={<House size={16} aria-hidden />}
+              size="sm"
+              variant="ghost"
+              onClick={() => navigate("welcome")}
+            />
+          </Tooltip>
 
-      <div className="my-1.5 h-px w-6 bg-border" />
+          <div className="my-1.5 h-px w-6 bg-border" />
+        </>
+      )}
 
       <RailButton
         label="Search tools, effects, or ask AI"
