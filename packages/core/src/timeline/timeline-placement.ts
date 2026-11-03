@@ -1,5 +1,9 @@
 import type { Project } from "../types";
-import { getTrackItems, isStandardTrack } from "./timeline-items";
+import {
+  getTrackItems,
+  isStandardTrack,
+  projectUsesUniversalTracks,
+} from "./timeline-items";
 
 export type TimelinePlacementPolicy = "gap" | "stack-above";
 
@@ -96,6 +100,10 @@ export function resolveTimelinePlacement(
     if (
       !candidate.locked &&
       isStandardTrack(candidate) &&
+      // The track list labels rows by their type, so an item must not land on a
+      // free row of another kind (a video on the "Text" row). Projects that opted
+      // into universal tracks have no meaningful type and keep any free row.
+      (projectUsesUniversalTracks(project) || candidate.type === target.type) &&
       isTimelineIntervalClear(
         project,
         candidate.id,

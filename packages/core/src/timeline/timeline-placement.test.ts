@@ -5,6 +5,7 @@ import { resolveTimelinePlacement } from "./timeline-placement";
 function projectWithTracks(
   tracks: Array<{
     id: string;
+    type?: string;
     locked?: boolean;
     clips?: Array<{ id: string; startTime: number; duration: number }>;
   }>,
@@ -27,7 +28,7 @@ function projectWithTracks(
       tracks: tracks.map((track) => ({
         id: track.id,
         name: track.id,
-        type: "video",
+        type: track.type ?? "video",
         mode: "standard",
         locked: track.locked ?? false,
         hidden: false,
@@ -101,5 +102,58 @@ describe("resolveTimelinePlacement", () => {
       startTime: 2,
       createdTrack: { id: "new-track", position: 1 },
     });
+  });
+
+  it("does not put a video on a free row of another kind, it creates a video row instead", () => {
+    const project = projectWithTracks([
+      { id: "titles", type: "text" },
+      { id: "video", clips: [{ id: "a", startTime: 0, duration: 5 }] },
+    ]);
+    expect(
+      resolveTimelinePlacement(project, {
+        targetTrackId: "video",
+        startTime: 1,
+        duration: 2,
+        policy: "stack-above",
+        newTrackId: "new-video",
+      }),
+    ).toEqual({
+      ok: true,
+      trackId: "new-video",
+      startTime: 1,
+      createdTrack: { id: "new-video", position: 1 },
+    });
+  });
+
+  it("still reuses a free row of the same kind above, skipping rows of other kinds", () => {
+    const project = projectWithTracks([
+      { id: "video-above" },
+      { id: "titles", type: "text" },
+      { id: "video", clips: [{ id: "a", startTime: 0, duration: 5 }] },
+    ]);
+    expect(
+      resolveTimelinePlacement(project, {
+        targetTrackId: "video",
+        startTime: 1,
+        duration: 2,
+        policy: "stack-above",
+      }),
+    ).toEqual({ ok: true, trackId: "video-above", startTime: 1 });
+  });
+
+  it("keeps any free row in projects that use universal tracks", () => {
+    const project = projectWithTracks([
+      { id: "titles", type: "text" },
+      { id: "video", clips: [{ id: "a", startTime: 0, duration: 5 }] },
+    ]);
+    (project as { capabilities?: string[] }).capabilities = ["universal-tracks-v1"];
+    expect(
+      resolveTimelinePlacement(project, {
+        targetTrackId: "video",
+        startTime: 1,
+        duration: 2,
+        policy: "stack-above",
+      }),
+    ).toEqual({ ok: true, trackId: "titles", startTime: 1 });
   });
 });
