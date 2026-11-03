@@ -107,3 +107,43 @@ describe("pitch of retimed clips", () => {
     expect(peakBetween(second, 0.2, 2.8)).toBeGreaterThan(0.3);
   });
 });
+
+describe("fades and keyframes of retimed clips", () => {
+  async function renderConstant(project: ReturnType<typeof createAudioProject>, duration: number) {
+    const rendering = await createRenderingEngine(
+      createToneBuffer(10, SAMPLE_RATE, { constant: true, amplitude: 0.5 }),
+    );
+    restore = rendering.restore;
+    const rendered = await rendering.engine.renderAudio(project, 0, duration);
+    return rendered.buffer as unknown as Parameters<typeof valueAt>[0];
+  }
+
+  it("measures a fade-out against the timeline length of a 2x clip", async () => {
+    const project = createAudioProject({
+      startTime: 0,
+      duration: 4,
+      inPoint: 0,
+      outPoint: 8,
+      speed: 2,
+      pitchCorrection: false,
+      fade: { fadeIn: 0, fadeOut: 2 },
+    });
+    const out = await renderConstant(project, 5);
+    expect(valueAt(out, 1.5)).toBeCloseTo(0.5, 2);
+    expect(valueAt(out, 3)).toBeCloseTo(0.25, 2);
+  });
+
+  it("keeps a fade-out audible on a pitch-corrected 0.5x clip", async () => {
+    const project = createAudioProject({
+      startTime: 0,
+      duration: 6,
+      inPoint: 0,
+      outPoint: 3,
+      speed: 0.5,
+      fade: { fadeIn: 0, fadeOut: 2 },
+    });
+    const out = await renderConstant(project, 7);
+    expect(valueAt(out, 3)).toBeCloseTo(0.5, 1);
+    expect(valueAt(out, 5)).toBeCloseTo(0.25, 1);
+  });
+});
