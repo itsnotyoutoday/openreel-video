@@ -9,7 +9,8 @@ import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 
 export function selectVoiceOverMimeType(
-  supports: (mimeType: string) => boolean = MediaRecorder.isTypeSupported,
+  supports: (mimeType: string) => boolean = (mimeType) =>
+    typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mimeType),
 ): { mimeType: string; extension: string } | null {
   const candidates = [
     { mimeType: "audio/webm;codecs=opus", extension: "webm" },
