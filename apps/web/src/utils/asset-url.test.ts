@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assetUrl, getBasePath } from "./asset-url";
 import { setHostRuntime } from "../embed/host-runtime";
 
-const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+// Relative to the package root (vitest runs with it as the working directory);
+// import.meta.url is not a file: URL under jsdom.
+const read = (relative: string) => readFileSync(resolve(process.cwd(), relative), "utf8");
 
 const runtimeWith = (basePath?: string) => ({
   options: { basePath },
@@ -73,12 +76,12 @@ describe("service worker registration", () => {
 
 describe("sub-path support in static files", () => {
   it("the service worker caches its shell relative to its own location", () => {
-    const sw = read("../../public/sw.js");
+    const sw = read("public/sw.js");
     expect(sw).toContain('const STATIC_ASSETS = ["./", "./index.html", "./manifest.json"]');
   });
 
   it("the 3D text renderer no longer hard-codes root-absolute font paths", () => {
-    const source = read("../components/editor/preview/threejs-layer-renderer.ts");
+    const source = read("src/components/editor/preview/threejs-layer-renderer.ts");
     expect(source).not.toMatch(/["']\/fonts\//);
   });
 });
