@@ -345,7 +345,9 @@ export class AudioEngine {
     const clipStart = Math.max(clip.startTime, rangeStart);
     const clipEnd = Math.min(clip.startTime + clip.duration, rangeEnd);
     const offsetInClip = clipStart - clip.startTime;
-    const sourceTime = clip.inPoint + offsetInClip;
+    const clipSpeed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    // offsetInClip is timeline time; the source advances clipSpeed times faster.
+    const sourceTime = clip.inPoint + offsetInClip * clipSpeed;
     const clipAudioEffects = resolveClipAudioEffects(clip, timeline);
     const pan = getPanFromAudioEffects(
       clipAudioEffects.length > 0 ? clipAudioEffects : clip.effects,
@@ -490,10 +492,12 @@ export class AudioEngine {
       ? processedClip.buffer.duration - processedClip.startOffset
       : processedClip.startOffset;
 
+    // AudioBufferSourceNode.start() duration is in SOURCE seconds (unaffected by
+    // playbackRate): a timeline span of D seconds consumes D * speed source seconds.
     source.start(
       contextStartTime,
       Math.max(0, startOffset),
-      Math.min(clipInfo.duration, processedClip.renderDuration),
+      Math.min(clipInfo.duration, processedClip.renderDuration) * speed,
     );
   }
 
