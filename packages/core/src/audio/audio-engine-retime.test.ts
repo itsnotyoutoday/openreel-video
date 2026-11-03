@@ -115,6 +115,7 @@ function createProject(clip: {
   inPoint: number;
   outPoint: number;
   speed?: number;
+  pitchCorrection?: boolean;
 }): Project {
   return {
     settings: { sampleRate: SAMPLE_RATE, channels: 2 },
@@ -149,6 +150,9 @@ function createProject(clip: {
               transform: {},
               volume: 1,
               keyframes: [],
+              // These tests are about how playback is scheduled when the audio is
+              // resampled; pitch-corrected rendering is covered in audio-engine-render.
+              pitchCorrection: false,
               ...clip,
             },
           ],

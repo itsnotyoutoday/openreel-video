@@ -45,6 +45,7 @@ export interface AudioClipRenderInfo {
   readonly fadeOut?: number;
   readonly speed?: number;
   readonly reversed?: boolean;
+  readonly pitchCorrection?: boolean;
   /** Zero-based index of the audio track within the source media file to use. */
   readonly audioTrackIndex?: number;
 }
