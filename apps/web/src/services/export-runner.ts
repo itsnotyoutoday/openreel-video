@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureProjectFonts } from "./project-fonts";
+import { getHostExportHandler } from "../embed/host-runtime";
 import {
   getExportEngine,
   type VideoExportSettings,
@@ -247,9 +248,13 @@ async function createOpfsDownloadWritable(
   } as unknown as FileSystemWritableFileStream;
 }
 
+/** The largest export a host's `onExport` can receive; it is held in memory. */
+const HOST_EXPORT_MAX_BYTES = 1024 * 1024 * 1024;
+
 function createBufferedDownloadWritable(
   filename: string,
   mime: string,
+  delivery?: { maxBytes: number; deliver: (blob: Blob) => void | Promise<void> },
 ): FileSystemWritableFileStream {
   let buffer = new Uint8Array(1024 * 1024);
   let length = 0;
@@ -260,7 +265,7 @@ function createBufferedDownloadWritable(
     if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid export file position");
   };
   const grow = (needed: number) => {
-    if (needed > 128 * 1024 * 1024) throw new Error("This export is too large for an in-memory download. Choose a file location or enable browser storage and try again.");
+    if (needed > (delivery?.maxBytes ?? 128 * 1024 * 1024)) throw new Error("This export is too large for an in-memory download. Choose a file location or enable browser storage and try again.");
     if (needed <= buffer.length) return;
     const next = new Uint8Array(Math.max(needed, buffer.length * 2));
     next.set(buffer.subarray(0, length));
@@ -290,7 +295,9 @@ function createBufferedDownloadWritable(
     async close() {
       checkOpen();
       if (!length) throw new Error("Export produced an empty file");
-      triggerAnchorDownload(new Blob([buffer.slice(0, length)], { type: mime }), filename);
+      const blob = new Blob([buffer.slice(0, length)], { type: mime });
+      if (delivery) await delivery.deliver(blob);
+      else triggerAnchorDownload(blob, filename);
       finished = true;
       buffer = new Uint8Array(0);
     },
@@ -317,6 +324,15 @@ export async function createDownloadWritable(
   mime: string,
   options?: { delivery?: ExportDeliveryMode },
 ): Promise<FileSystemWritableFileStream> {
+  // A host that asked for exports (events.onExport) receives the finished file
+  // instead of a download or a save dialog.
+  const hostExport = getHostExportHandler();
+  if (hostExport) {
+    return createBufferedDownloadWritable(filename, mime, {
+      maxBytes: HOST_EXPORT_MAX_BYTES,
+      deliver: (blob) => hostExport({ blob, filename, mimeType: mime }),
+    });
+  }
   const ext = filename.split(".").pop() || "mp4";
   if (options?.delivery === "download") return createFallbackWritable(filename, mime);
 

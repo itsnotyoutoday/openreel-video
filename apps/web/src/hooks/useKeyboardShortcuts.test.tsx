@@ -218,7 +218,7 @@ describe("keyboard editing commands", () => {
 
 describe("keyboard shortcut scope", () => {
   const hostWrapper = (root: HTMLElement) => ({ children }: { children: ReactNode }) => {
-    const runtime: HostRuntime = { options: {}, root };
+    const runtime: HostRuntime = { options: {}, root, getProject: () => ({}) as never };
     return <HostRuntimeContext.Provider value={runtime}>{children}</HostRuntimeContext.Provider>;
   };
 

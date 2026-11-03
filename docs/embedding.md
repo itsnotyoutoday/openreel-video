@@ -121,6 +121,30 @@ overlay helpers (`createTextOverlay`, `updateTextOverlay`, `createShapeOverlay`,
 through the engine-aware helpers: the raw `text/*`, `shape/*` actions only
 change serialized arrays and do not reach the preview or export engines.
 
+## Events
+
+```ts
+mountEditor(el, {
+  events: {
+    onSave: ({ project, revision }) => {},
+    onChange: ({ project }) => {},
+    onExport: async ({ blob, filename, mimeType, project }) => {},
+    onSelectionChange: (selection) => {}, // [{ id, trackId, type }]
+  },
+});
+```
+
+- `onSave`: after a save through the storage provider (Ctrl/Cmd+S or
+  `editor.saveProject()`), with the provider's revision.
+- `onChange`: the project changed; trailing-debounced by about 250 ms.
+- `onExport`: an export finished. While it is set, the editor hands the file to
+  the host instead of downloading it or opening a save dialog. The file is held
+  in memory (limit 1 GiB); if the callback rejects, the export fails.
+- `onSelectionChange`: the timeline selection changed.
+
+An exception thrown by a callback is logged and never breaks the editor.
+Handlers are removed on unmount.
+
 ## Keyboard shortcuts
 
 When embedded, shortcuts react only to key events that originate inside the

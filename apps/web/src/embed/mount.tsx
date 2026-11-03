@@ -1,3 +1,4 @@
+import type { Project } from "@openreel/core";
 import { StrictMode, Suspense, lazy, useEffect, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -11,15 +12,15 @@ import { AstryxProvider } from "../components/astryx/AstryxProvider";
 import { EditorInterface } from "../components/editor/EditorInterface";
 import { autoSaveManager } from "../services/auto-save";
 import {
-  loadProjectFromProvider,
-  saveProjectToProvider,
   forgetKnownRevisions,
+  loadProjectFromProvider,
 } from "../services/storage/project-persistence";
 import { setStorageProvider } from "../services/storage/storage-context";
 import {
   disposeProjectAutoSave,
   useProjectStore,
 } from "../stores/project-store";
+import { projectManager } from "../services/project-manager";
 import { createEmptyProject } from "../stores/project/project-helpers";
 import { useTimelineStore } from "../stores/timeline-store";
 import { useUIStore } from "../stores/ui-store";
@@ -28,7 +29,7 @@ import {
   setHostRuntime,
   type HostRuntime,
 } from "./host-runtime";
-import type { EditorHostOptions, MountedEditor } from "./types";
+import type { EditorEvents, EditorHostOptions, MountedEditor } from "./types";
 
 const SearchModal = lazy(() =>
   import("../components/editor/SearchModal").then((m) => ({ default: m.SearchModal })),
@@ -38,6 +39,72 @@ const ScriptViewDialog = lazy(() =>
 );
 
 let mounted: MountedEditor | null = null;
+
+const CHANGE_DEBOUNCE_MS = 250;
+
+/** Call a host callback; its failure is logged, never thrown into the editor. */
+function callHost(name: string, fn: () => unknown): void {
+  try {
+    const result = fn();
+    if (result instanceof Promise) {
+      result.catch((error: unknown) => {
+        console.error(`[OpenReel] events.${name} failed:`, error);
+      });
+    }
+  } catch (error) {
+    console.error(`[OpenReel] events.${name} failed:`, error);
+  }
+}
+
+/** Forward editor activity to the host's callbacks; returns the cleanup. */
+function wireEvents(events: EditorEvents | undefined): () => void {
+  if (!events) return () => undefined;
+  const cleanups: Array<() => void> = [];
+
+  const { onSave, onChange, onSelectionChange } = events;
+  if (onSave) {
+    cleanups.push(
+      projectManager.on("projectSaved", (data) => {
+        const { project, revision } = data as { project: Project; revision?: string };
+        callHost("onSave", () => onSave({ project, revision }));
+      }),
+    );
+  }
+  if (onChange) {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = useProjectStore.subscribe(
+      (state) => state.project,
+      () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          callHost("onChange", () =>
+            onChange({ project: useProjectStore.getState().getFullProject() }),
+          );
+        }, CHANGE_DEBOUNCE_MS);
+      },
+    );
+    cleanups.push(() => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    });
+  }
+  if (onSelectionChange) {
+    cleanups.push(
+      useUIStore.subscribe(
+        (state) => state.selectedItems,
+        (items) => {
+          callHost("onSelectionChange", () =>
+            onSelectionChange(
+              items.map(({ id, trackId, type }) => ({ id, trackId, type })),
+            ),
+          );
+        },
+      ),
+    );
+  }
+  return () => cleanups.forEach((cleanup) => cleanup());
+}
 
 async function openStoredProject(id: string): Promise<void> {
   const project = await loadProjectFromProvider(id);
@@ -158,8 +225,13 @@ export function mountEditor(
   element.tabIndex = -1;
   container.appendChild(element);
 
-  const runtime: HostRuntime = { options, root: element };
+  const runtime: HostRuntime = {
+    options,
+    root: element,
+    getProject: () => useProjectStore.getState().getFullProject(),
+  };
   setHostRuntime(runtime);
+  const unwireEvents = wireEvents(options.events);
   if (options.storage) setStorageProvider(options.storage);
 
   const root = createRoot(element);
@@ -182,6 +254,7 @@ export function mountEditor(
       unmounted = true;
       root.unmount();
       element.remove();
+      unwireEvents();
       toolRemovers.splice(0).reverse().forEach((remove) => remove());
       disposeProjectAutoSave();
       autoSaveManager.stop();
@@ -214,7 +287,7 @@ export function mountEditor(
     openProject: openStoredProject,
     createProject: createNew,
     async saveProject() {
-      return saveProjectToProvider(useProjectStore.getState().getFullProject());
+      return projectManager.saveToProvider(useProjectStore.getState().getFullProject());
     },
     getProject: () => useProjectStore.getState().getFullProject(),
     async importFile(file) {

@@ -4,6 +4,7 @@ import type {
   ProjectSettings,
   RecentProjectRecord,
   RecentProjectStore,
+  SaveProjectResult,
 } from "@openreel/core";
 import { normalizeProjectStoredFields } from "@openreel/core";
 import { v4 as uuidv4 } from "uuid";
@@ -285,13 +286,19 @@ class ProjectManager {
     return project;
   }
 
+  /** Save through the active storage provider and announce it. */
+  async saveToProvider(project: Project): Promise<SaveProjectResult> {
+    const result = await saveProjectToProvider(project);
+    await this.addToRecent(project);
+    this.emit("projectSaved", { project, revision: result.revision });
+    return result;
+  }
+
   async saveProject(project: Project): Promise<boolean> {
     if (hasHostStorageProvider()) {
       // A host owns persistence: save through its storage provider instead of
       // asking the user for a file.
-      await saveProjectToProvider(project);
-      await this.addToRecent(project);
-      this.emit("projectSaved", { project });
+      await this.saveToProvider(project);
       return true;
     }
     if (this.currentFileHandle) {

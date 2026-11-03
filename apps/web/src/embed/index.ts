@@ -1,5 +1,8 @@
 export { mountEditor } from "./mount";
 export type {
+  EditorEvents,
+  ExportedFile,
+  SelectedTimelineItem,
   EditorHostOptions,
   HostMediaAsset,
   HostMediaSource,

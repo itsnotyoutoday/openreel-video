@@ -31,6 +31,41 @@ export interface HostMediaSource {
   resolve(assetId: string): Promise<Blob>;
 }
 
+/** A finished export handed to {@link EditorEvents.onExport}. */
+export interface ExportedFile {
+  readonly blob: Blob;
+  readonly filename: string;
+  readonly mimeType: string;
+  /** The project as it was exported. */
+  readonly project: Project;
+}
+
+/** One selected item on the timeline. */
+export interface SelectedTimelineItem {
+  readonly id: string;
+  readonly trackId?: string;
+  readonly type: string;
+}
+
+/**
+ * Callbacks the editor invokes. All are optional, and an exception thrown by a
+ * callback is logged and never breaks the editor.
+ */
+export interface EditorEvents {
+  /** The project was saved through the storage provider. */
+  onSave?(event: { project: Project; revision?: string }): void | Promise<void>;
+  /** The project changed. Trailing-debounced (about 250 ms). */
+  onChange?(event: { project: Project }): void;
+  /**
+   * An export finished. While this is set the editor hands the file to the
+   * host instead of downloading it or opening a save dialog. The file is held
+   * in memory, so exports above 1 GiB fail. A rejection fails the export.
+   */
+  onExport?(file: ExportedFile): void | Promise<void>;
+  /** The timeline selection changed. */
+  onSelectionChange?(selection: readonly SelectedTimelineItem[]): void;
+}
+
 /** What a host passes to {@link mountEditor}. Every field is optional. */
 export interface EditorHostOptions {
   /** Replaces the built-in IndexedDB storage. */
@@ -42,6 +77,8 @@ export interface EditorHostOptions {
    * the editor loads at runtime (workers, wasm, fonts) resolve against it.
    */
   readonly basePath?: string;
+  /** Callbacks for save, change, export and selection. */
+  readonly events?: EditorEvents;
   /** Tools the in-editor agent may call; removed again on unmount. */
   readonly tools?: readonly HostToolDefinition[];
   /** Extra arguments for existing tools, keyed by tool name. */

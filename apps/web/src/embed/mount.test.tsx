@@ -208,4 +208,72 @@ describe("mountEditor", () => {
     expect(listTools()).toHaveLength(baseline);
     expect(container.childElementCount).toBe(0);
   });
+
+  it("calls onSave with the project and revision after a save", async () => {
+    const onSave = vi.fn();
+    setup({ storage: createMemoryStorageProvider(), events: { onSave } });
+    await flush();
+
+    await editor!.saveProject();
+
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onSave.mock.calls[0][0].project.id).toBe(useProjectStore.getState().project.id);
+    expect(onSave.mock.calls[0][0].revision).toBe("1");
+  });
+
+  it("calls onChange once, debounced, with the latest project", async () => {
+    const onChange = vi.fn();
+    setup({ events: { onChange } });
+    await flush();
+
+    for (const name of ["a", "b", "c"]) {
+      act(() => useProjectStore.setState({ project: { ...useProjectStore.getState().project, name } }));
+    }
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0].project.name).toBe("c");
+  });
+
+  it("calls onSelectionChange with plain items", async () => {
+    const onSelectionChange = vi.fn();
+    setup({ events: { onSelectionChange } });
+    await flush();
+
+    act(() => useUIStore.getState().select({ id: "clip-1", trackId: "t1", type: "clip" }));
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith([{ id: "clip-1", trackId: "t1", type: "clip" }]);
+  });
+
+  it("logs a throwing callback instead of breaking the editor", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const onSelectionChange = vi.fn(() => { throw new Error("host bug"); });
+    setup({ events: { onSelectionChange } });
+    await flush();
+
+    expect(() => act(() => useUIStore.getState().select({ id: "c", trackId: "t", type: "clip" }))).not.toThrow();
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("stops calling event handlers after unmount", async () => {
+    const onSelectionChange = vi.fn();
+    const onSave = vi.fn();
+    setup({ storage: createMemoryStorageProvider(), events: { onSelectionChange, onSave } });
+    await flush();
+    await act(async () => { editor!.unmount(); });
+    onSelectionChange.mockClear();
+
+    act(() => useUIStore.getState().select({ id: "c", trackId: "t", type: "clip" }));
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("mounts without events as before", async () => {
+    setup();
+    await flush();
+    act(() => useUIStore.getState().select({ id: "c", trackId: "t", type: "clip" }));
+    expect(container!.querySelector("[data-openreel-root]")).not.toBeNull();
+  });
 });
