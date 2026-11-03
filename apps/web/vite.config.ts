@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { stripFfmpegPlugin } from "./vite-plugins/strip-ffmpeg";
 import { pruneFontsPlugin } from "./vite-plugins/prune-fonts";
+import { resolveBase } from "./vite-plugins/base-path";
 
 const isDesktop = process.env.OPENREEL_DESKTOP === "1";
 
@@ -29,7 +30,7 @@ function desktopHtmlPlugin() {
 }
 
 export default defineConfig({
-  base: isDesktop ? "./" : "/",
+  base: resolveBase(process.env.OPENREEL_BASE, isDesktop),
   plugins: [react(), desktopHtmlPlugin(), stripFfmpegPlugin(isDesktop), pruneFontsPlugin(isDesktop)],
   assetsInclude: ["**/*.wasm"],
   resolve: {

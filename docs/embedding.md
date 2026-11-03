@@ -165,6 +165,32 @@ remembered in `localStorage` (`openreel-theme`) like in the standalone app, and
 that content colours (effects, user-chosen text colours, marker presets) stay
 literal on purpose.
 
+## Serving from a sub-path
+
+- Standalone build: `OPENREEL_BASE=/tools/editor/ pnpm --filter @openreel/web build`
+  sets Vite's `base`. Workers and wasm are located with `new URL(..., import.meta.url)`
+  and follow the bundle; public files (the 3D text fonts) and the service worker
+  use `assetUrl()`, which honours the base. The service worker is registered
+  with the sub-path as its scope, and its shell cache is relative to `sw.js`.
+- Embedded: `mountEditor(el, { basePath: "/tools/editor/" })` sets the prefix
+  `assetUrl()` uses for files from `public/`. Copy the contents of
+  `apps/web/public/` (at least `fonts/`) to that path.
+- There is no router to configure: the standalone app routes with
+  `location.hash` and the embedded editor does not route at all.
+
+### Cross-origin isolation (COOP/COEP)
+
+The editor does not require it. In the source the only code gated on
+`crossOriginIsolated` is the video-stabilization engine
+(`packages/core/src/video/stabilization/vidstab-engine.ts`), which uses the
+multi-threaded ffmpeg core when the page is isolated and the single-threaded one
+otherwise. The in-browser Whisper captioning runs on onnxruntime-web, which
+(from its documented behaviour; not exercised here) falls back to one thread
+without `SharedArrayBuffer`. The
+standalone dev and preview servers and `public/_headers` send COOP/COEP; a host
+that wants multi-threaded stabilization must send `Cross-Origin-Opener-Policy:
+same-origin` and `Cross-Origin-Embedder-Policy: require-corp` itself.
+
 ## Keyboard shortcuts
 
 When embedded, shortcuts react only to key events that originate inside the
