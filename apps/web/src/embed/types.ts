@@ -1,3 +1,4 @@
+import type { EditorTheme } from "./theme";
 import type {
   HostToolDefinition,
   ToolSchemaExtension,
@@ -77,6 +78,8 @@ export interface EditorHostOptions {
    * the editor loads at runtime (workers, wasm, fonts) resolve against it.
    */
   readonly basePath?: string;
+  /** Light/dark mode and CSS tokens, scoped to the editor root. */
+  readonly theme?: EditorTheme;
   /** Callbacks for save, change, export and selection. */
   readonly events?: EditorEvents;
   /** Tools the in-editor agent may call; removed again on unmount. */
@@ -106,6 +109,8 @@ export interface MountedEditor {
   saveProject(): Promise<SaveProjectResult>;
   /** The open project, including title and graphics clips. */
   getProject(): Project;
+  /** Change the theme; tokens from the previous theme are removed. */
+  setTheme(theme: EditorTheme | undefined): void;
   /** Register another agent tool; returns a function that removes it. */
   addTool(tool: HostToolDefinition): () => void;
   /** Remove an agent tool registered by this editor. */

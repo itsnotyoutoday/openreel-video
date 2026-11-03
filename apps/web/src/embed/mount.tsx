@@ -8,6 +8,8 @@ import {
   type HostToolDefinition,
   type ToolSchemaExtension,
 } from "@openreel/agent";
+import { ToastContainer } from "../components/Toast";
+import { createHtmlGuard, HtmlGuardBoundary } from "./html-guard";
 import { AstryxProvider } from "../components/astryx/AstryxProvider";
 import { EditorInterface } from "../components/editor/EditorInterface";
 import { autoSaveManager } from "../services/auto-save";
@@ -24,6 +26,8 @@ import { projectManager } from "../services/project-manager";
 import { createEmptyProject } from "../stores/project/project-helpers";
 import { useTimelineStore } from "../stores/timeline-store";
 import { useUIStore } from "../stores/ui-store";
+import "./embed.css";
+import { createThemeController, validateTheme } from "./theme";
 import {
   HostRuntimeContext,
   setHostRuntime,
@@ -193,6 +197,8 @@ export function mountEditor(
     );
   }
 
+  validateTheme(options.theme);
+
   // Register agent tools first: a bad definition throws before anything is
   // rendered, and the tools registered so far are removed again.
   const toolRemovers: Array<() => void> = [];
@@ -231,17 +237,25 @@ export function mountEditor(
     getProject: () => useProjectStore.getState().getFullProject(),
   };
   setHostRuntime(runtime);
+  const theme = createThemeController(element);
+  theme.apply(options.theme);
   const unwireEvents = wireEvents(options.events);
   if (options.storage) setStorageProvider(options.storage);
 
+  const htmlGuard = createHtmlGuard();
   const root = createRoot(element);
   element.focus({ preventScroll: true });
   root.render(
     <StrictMode>
       <HostRuntimeContext.Provider value={runtime}>
-        <AstryxProvider>
-          <EmbeddedEditor runtime={runtime} onError={() => undefined} />
-        </AstryxProvider>
+        <HtmlGuardBoundary guard={htmlGuard}>
+          <AstryxProvider>
+            <>
+              <EmbeddedEditor runtime={runtime} onError={() => undefined} />
+              <ToastContainer />
+            </>
+          </AstryxProvider>
+        </HtmlGuardBoundary>
       </HostRuntimeContext.Provider>
     </StrictMode>,
   );
@@ -253,8 +267,11 @@ export function mountEditor(
       if (unmounted) return;
       unmounted = true;
       root.unmount();
+      // Astryx's root theme removes the attributes it set on <html>.
+      htmlGuard.restore();
       element.remove();
       unwireEvents();
+      theme.dispose();
       toolRemovers.splice(0).reverse().forEach((remove) => remove());
       disposeProjectAutoSave();
       autoSaveManager.stop();
@@ -273,6 +290,7 @@ export function mountEditor(
         console.error("[OpenReel] Storage dispose failed:", error);
       });
     },
+    setTheme: (next) => theme.apply(next),
     addTool,
     removeTool(name) {
       if (!ownedTools.has(name)) return false;

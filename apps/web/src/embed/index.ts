@@ -1,4 +1,5 @@
 export { mountEditor } from "./mount";
+export type { EditorTheme } from "./theme";
 export type {
   EditorEvents,
   ExportedFile,

@@ -145,6 +145,26 @@ mountEditor(el, {
 An exception thrown by a callback is logged and never breaks the editor.
 Handlers are removed on unmount.
 
+## Theme
+
+```ts
+mountEditor(el, {
+  theme: { mode: "dark", tokens: { "--accent": "#ff5a36", "--bg": "#101014" } },
+});
+editor.setTheme({ mode: "light" });
+```
+
+`mode` is `"light" | "dark" | "auto"`. `tokens` are CSS custom properties set on
+the editor root only; the editor's colours are the variables in
+`apps/web/src/index.css` (`--bg`, `--fg`, `--accent`, `--border`, `--playhead`,
+`--preview-*`, `--graph-*`, and the Tailwind-facing HSL set). Light/dark markers
+(`data-theme`, the `dark` class) go on the editor root, never on the host's
+`<html>`. Colours that used to be hard-coded in the timeline playhead, preview
+stage and keyframe graph now read these tokens. Note that the choice of mode is
+remembered in `localStorage` (`openreel-theme`) like in the standalone app, and
+that content colours (effects, user-chosen text colours, marker presets) stay
+literal on purpose.
+
 ## Keyboard shortcuts
 
 When embedded, shortcuts react only to key events that originate inside the

@@ -72,6 +72,19 @@
     --c-text: #e8a44a;
     --c-audio: #8cc79a;
     --c-music: #14b8a6;
+
+    /* chrome colours that used to be hard-coded in components */
+    --playhead: #1d1d1f;
+    --preview-empty-bg: #ffffff;
+    --preview-empty-text: #a1a1aa;
+    --preview-text-primary: #18181b;
+    --preview-text-secondary: #71717a;
+    --preview-frame-bg: #f4f4f5;
+    --graph-bg: #1a1a1a;
+    --graph-grid: #333333;
+    --graph-axis: #555555;
+    --graph-label: #888888;
+    --graph-line: #ffffff;
   }
 
   /* dark theme — cinematic, near-black like reference */
@@ -106,6 +119,13 @@
     --accent-soft: oklch(0.7 0.15 162 / 0.2);
     --accent-fg: oklch(0.99 0 0);
     --accent-glow: oklch(0.7 0.15 162 / 0.45);
+
+    --playhead: #1d1d1f;
+    --preview-empty-bg: #0f0f11;
+    --preview-empty-text: #52525b;
+    --preview-text-primary: #ffffff;
+    --preview-text-secondary: #a1a1aa;
+    --preview-frame-bg: #18181b;
   }
 
   [data-density="compact"] {
@@ -163,24 +183,6 @@
     --destructive-foreground: 0 0% 95%;
     --input: 220 8% 24%;
     --ring: 158 64% 52%;
-  }
-
-  html,
-  body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  body {
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    font-size: var(--d-text);
-    color: var(--fg);
-    background: var(--bg);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    letter-spacing: -0.005em;
   }
 
   button { cursor: pointer; }

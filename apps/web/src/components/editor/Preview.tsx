@@ -5,6 +5,7 @@ import React, {
   useState,
   useMemo,
 } from "react";
+import { readCssVar } from "../../utils/css-token";
 import { PreviewTimecode } from "./PreviewTimecode";
 import { ExportProgressOverlay } from "./ExportProgressOverlay";
 import { useProjectFonts } from "../../hooks/useProjectFonts";
@@ -1347,11 +1348,7 @@ export const Preview: React.FC = () => {
       return;
     }
     const screenBg =
-      typeof window !== "undefined"
-        ? getComputedStyle(document.documentElement)
-            .getPropertyValue("--screen-bg")
-            .trim()
-        : "";
+      typeof window !== "undefined" ? readCssVar("--screen-bg", "") : "";
     previewBgRef.current = screenBg || (isDark ? "#000000" : "#ffffff");
   }, [canvasFillMode, canvasFillColor, isDark]);
 
@@ -3267,10 +3264,10 @@ export const Preview: React.FC = () => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const emptyBg = isDark ? "#0f0f11" : "#ffffff";
-      const emptyText = isDark ? "#52525b" : "#a1a1aa";
-      const textPrimary = isDark ? "#ffffff" : "#18181b";
-      const textSecondary = isDark ? "#a1a1aa" : "#71717a";
+      const emptyBg = readCssVar("--preview-empty-bg", isDark ? "#0f0f11" : "#ffffff");
+      const emptyText = readCssVar("--preview-empty-text", isDark ? "#52525b" : "#a1a1aa");
+      const textPrimary = readCssVar("--preview-text-primary", isDark ? "#ffffff" : "#18181b");
+      const textSecondary = readCssVar("--preview-text-secondary", isDark ? "#a1a1aa" : "#71717a");
 
       const activeShapeClips = getActiveShapeClips(allShapeClips, time);
       const activeTextClips = getActiveTextClips(allTextClips, time);
@@ -3290,9 +3287,7 @@ export const Preview: React.FC = () => {
       );
 
       ctx.fillStyle = hasVideoContent
-        ? isDark
-          ? "#18181b"
-          : "#f4f4f5"
+        ? readCssVar("--preview-frame-bg", isDark ? "#18181b" : "#f4f4f5")
         : emptyBg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
