@@ -275,8 +275,8 @@ export const ShapeClipComponent: React.FC<ShapeClipComponentProps> = ({
           } ${
             isSelected
               ? `ring-2 ring-${colorClass}-400 border-${colorClass}-400 z-10`
-              : `border-${colorClass}-500/30 hover:border-${colorClass}-500/60 hover:brightness-110`
-          } bg-${colorClass}-500/20 border`}
+              : "border-[color:var(--clip-graphic-border)] hover:brightness-110"
+          } bg-[color:var(--clip-graphic)] border`}
           style={{
             transform: `translateX(${left}px)`,
             width: `${Math.max(width, 40)}px`,

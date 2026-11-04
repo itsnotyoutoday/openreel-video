@@ -23,6 +23,7 @@ import {
   Sliders,
 } from "@/icons/lucide-compat";
 import { ToolcraftSegmentedControl } from "@openreel/ui";
+import { useHostRuntime } from "../../embed/host-runtime";
 import { ToolcraftCard as Card } from "@openreel/ui";
 import { ToolcraftClickableCard as ClickableCard } from "@openreel/ui";
 import { ToolcraftDialog as Dialog, ToolcraftDialogHeader as DialogHeader } from "@openreel/ui";
@@ -320,6 +321,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const { selectedItems, setPanelVisible } = useUIStore();
   const project = useProjectStore((state) => state.project);
 
+  const hostSearchLabel = useHostRuntime()?.options.labels?.search;
   const selectedClipType = useMemo(() => {
     const clipItem = selectedItems.find(
       (item) =>
@@ -488,9 +490,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     value={query}
                     onChange={setQuery}
                     placeholder={
-                      selectedClipType
+                      hostSearchLabel ??
+                      (selectedClipType
                         ? `Search effects for ${selectedClipType} clip...`
-                        : "Search all effects and tools..."
+                        : "Search all effects and tools...")
                     }
                     startIcon={<Search size={16} aria-hidden />}
                     width="100%"

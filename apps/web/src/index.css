@@ -30,6 +30,15 @@
     --topbar-h: 40px;
     --toolnav-h: 64px;
 
+    /* one z-index scale for floating UI: every menu, popover, select,
+       dialog, toast and tooltip sits above any stage overlay (the preview
+       stage is its own stacking context, so its overlays never compete). */
+    --z-stage-overlay: 30;
+    --z-dialog: 1000;
+    --z-popup: 1100;
+    --z-toast: 1200;
+    --z-tooltip: 1300;
+
     color-scheme: dark;
   }
 
@@ -41,6 +50,33 @@
     --bg-2: #f0f0f3;          /* recessed insets, pills, search fields */
     --bg-3: #ececed;          /* segmented-control track */
     --bg-elev: #ffffff;
+
+    /* timeline clip colours (override any of these through EditorTheme tokens) */
+    --clip-video: linear-gradient(160deg, #6f93b8, #3f5f7d);
+    --clip-video-border: transparent;
+    --clip-video-text: #ffffff;
+    --clip-image: linear-gradient(160deg, #9b84d6, #5a3d92);
+    --clip-image-border: transparent;
+    --clip-image-text: #ffffff;
+    --clip-audio: #dff1e5;
+    --clip-audio-border: #bfe0cb;
+    --clip-audio-text: #2f6b45;
+    --clip-audio-wave: #5aa876;
+    --clip-music: #e9e3fa;
+    --clip-music-border: #d3c9f3;
+    --clip-music-text: #5b43a8;
+    --clip-music-wave: #8b73d6;
+    --clip-text: rgba(245, 158, 11, 0.22);
+    --clip-text-border: rgba(217, 119, 6, 0.45);
+    --clip-graphic: rgba(34, 197, 94, 0.2);
+    --clip-graphic-border: rgba(22, 163, 74, 0.45);
+    --clip-other: linear-gradient(160deg, #a7b0c4, #6b748a);
+    --clip-other-border: transparent;
+    --clip-other-text: #ffffff;
+    /* placeholder clips (stand-ins for media that does not exist yet) */
+    --placeholder-bg: #d9dce4;
+    --placeholder-a: rgba(60, 70, 95, 0.2);
+    --placeholder-b: rgba(60, 70, 95, 0.06);
     --border: #e7e7ea;        /* card / input borders */
     --border-strong: #d4d4d8;
     --fg: #1d1d1f;            /* primary text */
@@ -72,6 +108,19 @@
     --c-text: #e8a44a;
     --c-audio: #8cc79a;
     --c-music: #14b8a6;
+
+    /* chrome colours that used to be hard-coded in components */
+    --playhead: #1d1d1f;
+    --preview-empty-bg: #ffffff;
+    --preview-empty-text: #a1a1aa;
+    --preview-text-primary: #18181b;
+    --preview-text-secondary: #71717a;
+    --preview-frame-bg: #f4f4f5;
+    --graph-bg: #1a1a1a;
+    --graph-grid: #333333;
+    --graph-axis: #555555;
+    --graph-label: #888888;
+    --graph-line: #ffffff;
   }
 
   /* dark theme — cinematic, near-black like reference */
@@ -82,6 +131,32 @@
     --bg-2: oklch(0.2 0.007 240);
     --bg-3: oklch(0.24 0.008 240);
     --bg-elev: oklch(0.22 0.007 240);
+
+    /* timeline clip colours: saturated, dark-friendly (no pale pastel on dark) */
+    --clip-video: linear-gradient(160deg, #3f6a94, #22405c);
+    --clip-video-border: rgba(255, 255, 255, 0.08);
+    --clip-video-text: #f3f7fb;
+    --clip-image: linear-gradient(160deg, #6a4fb0, #3b2a70);
+    --clip-image-border: rgba(255, 255, 255, 0.08);
+    --clip-image-text: #f6f2ff;
+    --clip-audio: #1d4a33;
+    --clip-audio-border: #2f6b4a;
+    --clip-audio-text: #c3ecd3;
+    --clip-audio-wave: #6fcf97;
+    --clip-music: #382d68;
+    --clip-music-border: #54449a;
+    --clip-music-text: #dcd2fd;
+    --clip-music-wave: #a592f0;
+    --clip-text: rgba(245, 158, 11, 0.32);
+    --clip-text-border: rgba(245, 158, 11, 0.55);
+    --clip-graphic: rgba(34, 197, 94, 0.3);
+    --clip-graphic-border: rgba(74, 222, 128, 0.5);
+    --clip-other: linear-gradient(160deg, #4b5470, #2d3347);
+    --clip-other-border: rgba(255, 255, 255, 0.08);
+    --clip-other-text: #eef0f6;
+    --placeholder-bg: #23252c;
+    --placeholder-a: rgba(255, 255, 255, 0.14);
+    --placeholder-b: rgba(255, 255, 255, 0.05);
     --border: oklch(0.26 0.008 240);
     --border-strong: oklch(0.34 0.01 240);
     --fg: oklch(0.97 0.003 240);
@@ -106,6 +181,13 @@
     --accent-soft: oklch(0.7 0.15 162 / 0.2);
     --accent-fg: oklch(0.99 0 0);
     --accent-glow: oklch(0.7 0.15 162 / 0.45);
+
+    --playhead: #1d1d1f;
+    --preview-empty-bg: #0f0f11;
+    --preview-empty-text: #52525b;
+    --preview-text-primary: #ffffff;
+    --preview-text-secondary: #a1a1aa;
+    --preview-frame-bg: #18181b;
   }
 
   [data-density="compact"] {
@@ -163,24 +245,6 @@
     --destructive-foreground: 0 0% 95%;
     --input: 220 8% 24%;
     --ring: 158 64% 52%;
-  }
-
-  html,
-  body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  body {
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    font-size: var(--d-text);
-    color: var(--fg);
-    background: var(--bg);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    letter-spacing: -0.005em;
   }
 
   button { cursor: pointer; }

@@ -6,6 +6,7 @@ import { motion } from "motion/react"
 import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@openreel/ui/lib/utils"
+import { usePortalContainer } from "@openreel/ui/lib/portal-container"
 
 const Select = SelectPrimitive.Root
 
@@ -70,8 +71,10 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
-  <SelectPrimitive.Portal>
+>(({ className, children, position = "popper", ...props }, ref) => {
+  const container = usePortalContainer()
+  return (
+  <SelectPrimitive.Portal container={container}>
     <SelectPrimitive.Content
       ref={ref}
       position={position}
@@ -84,7 +87,7 @@ const SelectContent = React.forwardRef<
         exit={{ opacity: 0, scale: 0.96, y: -4 }}
         transition={{ type: "spring", stiffness: 500, damping: 30 }}
         className={cn(
-          "relative z-[9999] max-h-[--radix-select-content-available-height] min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md origin-[--radix-select-content-transform-origin]",
+          "relative z-[var(--z-popup,9999)] max-h-[--radix-select-content-available-height] min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md origin-[--radix-select-content-transform-origin]",
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className
@@ -104,7 +107,8 @@ const SelectContent = React.forwardRef<
       </motion.div>
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
-))
+  )
+})
 SelectContent.displayName = SelectPrimitive.Content.displayName
 
 const SelectLabel = React.forwardRef<

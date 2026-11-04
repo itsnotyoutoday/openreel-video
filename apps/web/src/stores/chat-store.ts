@@ -13,7 +13,15 @@ import { runExclusive } from "../services/agent/host-singleton";
 import { makeDirectBYOKClient, validateAIEndpoint } from "../services/agent/direct-llm-transport";
 import { EditingSession } from "../services/agent/editing-session";
 import { editingToolDefs, editingToolReadOnly, executeEditingTool, EDITING_SYSTEM } from "../services/agent/editing-tools";
+import { executeWithHostTools, hostToolReadOnly, withHostTools } from "../services/agent/host-tools";
 import { useAIConnectionStore } from "./ai-connection-store";
+import {
+  emitAiMessage,
+  emitToolCall,
+  hasHostAi,
+  useHostAiStore,
+  withHostSystemPrompt,
+} from "../embed/host-ai";
 import {
   conversationTitle,
   useChatHistoryStore,
@@ -156,16 +164,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().setProjectContext(currentProjectId);
     }
 
-    const { provider, model, baseUrl: inputBaseUrl, apiKey } = useAIConnectionStore.getState();
-    if (!["openai", "anthropic", "compatible"].includes(provider)) { set({ error: "Choose an API format in Settings → AI Editor." }); return; }
-    if (!model.trim()) { set({ error: "Enter a model ID in Settings → AI Editor." }); return; }
-    let baseUrl: string;
-    try { baseUrl = validateAIEndpoint(inputBaseUrl); } catch { set({ error: "Enter a valid HTTPS endpoint, or HTTP on localhost." }); return; }
-    if (provider !== "compatible" && !apiKey) {
-      set({
-        error: "Add your session API key in Settings → AI Editor before sending an edit request.",
-      });
-      return;
+    // With a host-supplied AI the editor's own connection settings (provider,
+    // key, base URL) are never read.
+    const hostAi = hasHostAi();
+    let provider: "openai" | "anthropic" | "compatible" = "openai";
+    let model = "";
+    let baseUrl = "";
+    let apiKey = "";
+    if (hostAi) {
+      model = useHostAiStore.getState().model;
+      if (!model.trim()) { set({ error: "No AI model is available. Ask the host to configure one." }); return; }
+    } else {
+      const connection = useAIConnectionStore.getState();
+      provider = connection.provider;
+      model = connection.model;
+      apiKey = connection.apiKey;
+      if (!["openai", "anthropic", "compatible"].includes(provider)) { set({ error: "Choose an API format in Settings → AI Editor." }); return; }
+      if (!model.trim()) { set({ error: "Enter a model ID in Settings → AI Editor." }); return; }
+      try { baseUrl = validateAIEndpoint(connection.baseUrl); } catch { set({ error: "Enter a valid HTTPS endpoint, or HTTP on localhost." }); return; }
+      if (provider !== "compatible" && !apiKey) {
+        set({
+          error: "Add your session API key in Settings → AI Editor before sending an edit request.",
+        });
+        return;
+      }
     }
 
     const active = get();
@@ -199,6 +221,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversationStartedAt,
     }));
 
+    emitAiMessage("user", trimmed);
+
     const updateAssistant = (fn: (m: ChatMessage) => ChatMessage): void => {
       if (activeSeq !== seq) return;
       set((state) => ({
@@ -213,6 +237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           updateAssistant((m) => ({ ...m, text: event.text || m.text }));
           break;
         case "tool_call":
+          emitToolCall(event.call.name, "start");
           updateAssistant((m) => ({
             ...m,
             toolCalls: [
@@ -227,6 +252,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }));
           break;
         case "tool_result":
+          emitToolCall(event.call.name, "end", event.result.ok);
           updateAssistant((m) => ({
             ...m,
             toolCalls: m.toolCalls.map((tc) =>
@@ -259,17 +285,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const host = new EditingSession(controller.signal);
     let llm;
-    try { llm = makeDirectBYOKClient({
-      provider,
-      model,
-      baseUrl,
-      apiKey,
-      signal: controller.signal,
-    }); } catch (error) {
+    // Loaded on demand: the BYOK editor never pulls in the host transport.
+    const makeHostAiClient = hostAi ? (await import("../embed/host-ai-client")).makeHostAiClient : null;
+    const systemPrompt = hostAi ? await withHostSystemPrompt(EDITING_SYSTEM) : EDITING_SYSTEM;
+    try { llm = makeHostAiClient
+      ? makeHostAiClient({
+          signal: controller.signal,
+          onDelta: (text) => updateAssistant((m) => ({ ...m, text: m.text + text })),
+        })
+      : makeDirectBYOKClient({
+          provider,
+          model,
+          baseUrl,
+          apiKey,
+          signal: controller.signal,
+        }); } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Invalid connection settings", abortController: null });
       return;
     }
-    const tools = editingToolDefs(provider === "anthropic" ? "anthropic" : "openai");
+    const toolProvider = provider === "anthropic" ? "anthropic" : "openai";
+    const tools = withHostTools(editingToolDefs(toolProvider), toolProvider);
     const autoConfirm = useSettingsStore.getState().agentAutoConfirm;
     const dryRun = useSettingsStore.getState().agentDryRun;
 
@@ -279,10 +314,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         host,
         llm,
         tools,
-        system: EDITING_SYSTEM,
+        system: systemPrompt,
         messages: get().conversation,
-        execute: executeEditingTool,
-        readOnly: editingToolReadOnly,
+        execute: (name, args, session) => executeWithHostTools(name, args, session, executeEditingTool),
+        readOnly: (name) => hostToolReadOnly(name, editingToolReadOnly),
         atomic: true,
         signal: controller.signal,
         dryRun,
@@ -352,6 +387,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? (state.error ?? "The AI turn failed.")
           : state.error,
     }));
+    const answer = get().messages.find((message) => message.id === assistantId)?.text;
+    if (answer) emitAiMessage("assistant", answer);
     saveConversationSnapshot(get());
   },
 

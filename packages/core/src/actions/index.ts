@@ -8,3 +8,4 @@ export {
 } from "./action-history";
 export { ActionSerializer } from "./action-serializer";
 export { InverseActionGenerator } from "./inverse-action-generator";
+export { editLockViolation, type EditLockViolation } from "./edit-locks";

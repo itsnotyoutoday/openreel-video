@@ -19,6 +19,7 @@ import { useTimelineStore } from "../../../stores/timeline-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { getTimelineTrackSelection } from "../../../utils/timeline-item-actions";
 import { toast } from "../../../stores/notification-store";
+import { useHostClipMenuItems } from "../../../embed/use-host-menu";
 
 interface ClipContextMenuProps {
   clip: Clip;
@@ -148,6 +149,8 @@ export function useClipContextMenuItems({
     return null;
   };
 
+  const hostItems = useHostClipMenuItems(clip.id, clip);
+
   const items: ContextMenuOption[] = [
     {
       type: "section",
@@ -255,7 +258,7 @@ export function useClipContextMenuItems({
     },
   );
 
-  return items;
+  return [...items, ...hostItems];
 }
 
 export const ClipContextMenu: React.FC<ClipContextMenuProps> = (props) => {

@@ -1,3 +1,6 @@
+import { lockedGroupViolation } from "./handlers/groups";
+import { editLockViolation } from "./edit-locks";
+import { nextRowName } from "../timeline/row-placement";
 import type {
   Action,
   ActionResult,
@@ -18,6 +21,7 @@ import type {
   Project,
   Track,
   Clip,
+  ClipMetadata,
   Effect,
   Keyframe,
   EasingType,
@@ -159,7 +163,84 @@ export class ActionExecutor {
     this.inverseGenerator = new InverseActionGenerator();
   }
 
+  private readOnly = false;
+  private beforeEdit:
+    | ((op: { type: string; params: Record<string, unknown> }) => { ok: false; reason: string } | void)
+    | null = null;
+
+  /**
+   * A guard asked before every action: returning `{ ok: false, reason }` refuses
+   * it (code `HOST_VETO`, `reason` as the message). Not asked for undo and redo.
+   */
+  setBeforeEditGuard(
+    guard: ((op: { type: string; params: Record<string, unknown> }) => { ok: false; reason: string } | void) | null,
+  ): void {
+    this.beforeEdit = guard;
+  }
+  private lockedListener: ((event: { groupId: string; action: string }) => void) | null = null;
+
+  /** Told when an edit is refused because it would break a locked clip group. */
+  setLockedActionListener(listener: ((event: { groupId: string; action: string }) => void) | null): void {
+    this.lockedListener = listener;
+  }
+
+  /** While read-only, every action, undo and redo is refused. */
+  setReadOnly(readOnly: boolean): void {
+    this.readOnly = readOnly;
+  }
+
+  isReadOnly(): boolean {
+    return this.readOnly;
+  }
+
+  private static readonly READ_ONLY_RESULT: ActionResult = {
+    success: false,
+    error: { code: "READ_ONLY", message: "The editor is read only" },
+  };
+
   async execute(action: Action, project: Project): Promise<ActionResult> {
+    if (this.readOnly) return ActionExecutor.READ_ONLY_RESULT;
+    const locked = lockedGroupViolation(action, project);
+    if (locked) {
+      try {
+        this.lockedListener?.({ groupId: locked.groupId, action: locked.action });
+      } catch {
+        // a listener must never break editing
+      }
+      return {
+        success: false,
+        error: {
+          code: "GROUP_LOCKED",
+          message: locked.message,
+          details: { groupId: locked.groupId, action: locked.action },
+        },
+      };
+    }
+    const lock = editLockViolation(action, project);
+    if (lock) {
+      return {
+        success: false,
+        error: {
+          code: lock.code,
+          message: lock.message,
+          details: { clipId: lock.clipId, trackId: lock.trackId, lock: lock.lock },
+        },
+      };
+    }
+    if (this.beforeEdit) {
+      let verdict: { ok: false; reason: string } | void;
+      try {
+        verdict = this.beforeEdit({ type: action.type, params: action.params as Record<string, unknown> });
+      } catch {
+        verdict = undefined; // a guard that throws must not stop editing
+      }
+      if (verdict && verdict.ok === false) {
+        return {
+          success: false,
+          error: { code: "HOST_VETO", message: verdict.reason, details: { type: action.type } },
+        };
+      }
+    }
     const validationResult = this.validator.validate(action, project);
 
     if (!validationResult.valid) {
@@ -225,6 +306,7 @@ export class ActionExecutor {
   }
 
   async undo(project: Project): Promise<ActionResult> {
+    if (this.readOnly) return ActionExecutor.READ_ONLY_RESULT;
     if (!this.history.canUndo()) {
       return {
         success: false,
@@ -264,6 +346,7 @@ export class ActionExecutor {
   }
 
   async redo(project: Project): Promise<ActionResult> {
+    if (this.readOnly) return ActionExecutor.READ_ONLY_RESULT;
     if (!this.history.canRedo()) {
       return {
         success: false,
@@ -513,31 +596,13 @@ export class ActionExecutor {
           role?: Track["role"];
           name?: string;
         };
-        const trackNames: Record<string, string> = {
-          video: "Video",
-          audio: "Audio",
-          image: "Image",
-          text: "Text",
-          graphics: "Graphics",
-        };
-        const trackCount =
-          timeline.tracks.filter((track: MutableTrack) =>
-            params.mode === "standard"
-              ? track.mode === "standard"
-              : track.type === params.trackType,
-          ).length + 1;
         const newTrack: MutableTrack = {
           id: params.trackId ?? `track-${crypto.randomUUID()}`,
           type: params.trackType as Track["type"],
           mode: params.mode,
           role: params.role,
-          name:
-            params.name ??
-            `${
-              params.mode === "standard"
-                ? "Track"
-                : trackNames[params.trackType] || params.trackType
-            } ${trackCount}`,
+          // named by kind like placement names rows: "Video 2", never a label already in use
+          name: params.name ?? nextRowName(timeline.tracks, params.trackType as Track["type"]),
           clips: [],
           transitions: [],
           locked: false,
@@ -820,6 +885,7 @@ export class ActionExecutor {
           audioTrackIndex?: number;
           sourceClip?: Clip;
           clipId?: string;
+          metadata?: ClipMetadata;
         };
         const track = timeline.tracks.find(
           (t: MutableTrack) => t.id === params.trackId,
@@ -873,6 +939,7 @@ export class ActionExecutor {
                 ...(params.audioTrackIndex !== undefined
                   ? { audioTrackIndex: params.audioTrackIndex }
                   : {}),
+                ...(params.metadata ? { metadata: params.metadata } : {}),
               };
           params.clipId = newClip.id;
           track.clips = [...track.clips, newClip];

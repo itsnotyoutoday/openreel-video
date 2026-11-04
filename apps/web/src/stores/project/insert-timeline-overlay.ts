@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { resolveTimelinePlacement } from "@openreel/core";
+import { nextRowName, resolveTimelinePlacement } from "@openreel/core";
 import { useProjectStore } from "../project-store";
 
 /**
@@ -48,10 +48,11 @@ export async function insertTimelineOverlay<T>(
   try {
     if (placement.createdTrack) {
       const result = await useProjectStore.getState().addTrack(
-        "video",
+        placement.createdTrack.type ?? "video",
         placement.createdTrack.position,
         {
           mode: "standard",
+          name: nextRowName(initialProject.timeline.tracks, placement.createdTrack.type ?? "video"),
           trackId: placement.createdTrack.id,
         },
       );

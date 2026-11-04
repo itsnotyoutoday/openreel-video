@@ -22,10 +22,17 @@ export function getMissingExportMedia(project: Project, range?: VideoExportSetti
   const referenced = new Set(project.timeline.tracks.flatMap((track) => track.clips
     .filter((clip) => !range || (clip.startTime < range.endTime && clip.startTime + clip.duration > range.startTime))
     .map((clip) => clip.mediaId)));
+  // a clip's display name (metadata.host.label, set by an embedding host) beats the media's file name
+  const labelOf = (mediaId: string): string | undefined =>
+    project.timeline.tracks
+      .flatMap((track) => track.clips)
+      .filter((clip) => clip.mediaId === mediaId)
+      .map((clip) => clip.metadata?.host?.label)
+      .find((label): label is string => typeof label === "string" && label.trim() !== "");
   return [...referenced].flatMap((id) => {
     const item = project.mediaLibrary.items.find((candidate) => candidate.id === id);
-    if (!item) return [id];
-    if (["video", "audio", "image"].includes(item.type) && (!item.blob || item.isPlaceholder)) return [item.name || id];
+    if (!item) return [labelOf(id) ?? id];
+    if (["video", "audio", "image"].includes(item.type) && (!item.blob || item.isPlaceholder)) return [labelOf(id) ?? (item.name || id)];
     return [];
   });
 }

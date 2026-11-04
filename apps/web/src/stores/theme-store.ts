@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { applyThemeAttributes } from "../utils/theme-target";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -34,13 +35,7 @@ export const useThemeStore = create<ThemeState>()(
         const isDark = calculateIsDark(mode);
         set({ mode, isDark });
 
-        if (isDark) {
-          document.documentElement.classList.add("dark");
-          document.documentElement.dataset.theme = "dark";
-        } else {
-          document.documentElement.classList.remove("dark");
-          document.documentElement.dataset.theme = "light";
-        }
+        applyThemeAttributes(isDark);
       },
 
       toggleTheme: () => {
@@ -60,13 +55,7 @@ export const useThemeStore = create<ThemeState>()(
         if (state) {
           const isDark = calculateIsDark(state.mode);
           state.isDark = isDark;
-          if (isDark) {
-            document.documentElement.classList.add("dark");
-            document.documentElement.dataset.theme = "dark";
-          } else {
-            document.documentElement.classList.remove("dark");
-            document.documentElement.dataset.theme = "light";
-          }
+          applyThemeAttributes(isDark);
         }
       },
     },
@@ -82,13 +71,7 @@ if (typeof window !== "undefined") {
       const isDark = e.matches;
       useThemeStore.setState({ isDark });
 
-      if (isDark) {
-        document.documentElement.classList.add("dark");
-        document.documentElement.dataset.theme = "dark";
-      } else {
-        document.documentElement.classList.remove("dark");
-        document.documentElement.dataset.theme = "light";
-      }
+      applyThemeAttributes(isDark);
     }
   });
 }

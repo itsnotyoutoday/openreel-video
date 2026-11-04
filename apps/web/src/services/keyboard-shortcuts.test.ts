@@ -165,3 +165,130 @@ describe("shortcut initialization", () => {
     localStorage.removeItem("openreel_shortcuts");
   });
 });
+
+describe("scoped keyboard shortcuts", () => {
+  afterEach(() => keyboardShortcuts.setScope(null));
+
+  it("by default reacts to key events anywhere on the window", () => {
+    const handler = listen("tools.addText");
+    const outside = document.createElement("div");
+    document.body.appendChild(outside);
+    press("t", {}, outside);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("with a scope only reacts to events originating inside the scope element", () => {
+    const handler = listen("tools.addText");
+    const root = document.createElement("div");
+    const inside = document.createElement("div");
+    const outside = document.createElement("div");
+    root.appendChild(inside);
+    document.body.append(root, outside);
+    keyboardShortcuts.setScope(root);
+
+    press("t", {}, outside);
+    press("t");
+    expect(handler).not.toHaveBeenCalled();
+
+    press("t", {}, inside);
+    press("t", {}, root);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns to window-wide listening when the scope is cleared, without duplicate listeners", () => {
+    const handler = listen("tools.addText");
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    keyboardShortcuts.setScope(root);
+    keyboardShortcuts.setScope(null);
+
+    press("t");
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening on the scope element when listening stops", () => {
+    const handler = listen("tools.addText");
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    keyboardShortcuts.setScope(root);
+    keyboardShortcuts.stopListening();
+    press("t", {}, root);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+function release(key: string, target: EventTarget = window) {
+  target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
+}
+
+describe("shuttle keys (J, K, L)", () => {
+  it("binds J, K and L to the shuttle actions in every preset", () => {
+    for (const preset of keyboardShortcuts.getPresets()) {
+      keyboardShortcuts.applyPreset(preset.id);
+      expect(keyboardShortcuts.getShortcut("playback.shuttleReverse")?.currentKey, preset.id).toBe("j");
+      expect(keyboardShortcuts.getShortcut("playback.shuttlePause")?.currentKey, preset.id).toBe("k");
+      expect(keyboardShortcuts.getShortcut("playback.shuttleForward")?.currentKey, preset.id).toBe("l");
+    }
+    keyboardShortcuts.applyPreset("openreel");
+  });
+
+  it("does not clash with any other default shortcut", () => {
+    for (const key of ["j", "k", "l"]) {
+      const owners = keyboardShortcuts.getAllShortcuts().filter((s) => s.currentKey === key);
+      expect(owners).toHaveLength(1);
+    }
+  });
+
+  it("delivers key-up for the key bound to an action", () => {
+    const handler = vi.fn();
+    cleanups.push(keyboardShortcuts.registerKeyUpHandler("playback.shuttlePause", handler));
+    release("k");
+    expect(handler).toHaveBeenCalledOnce();
+    release("x");
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("delivers key-up even when focus has moved into a text field", () => {
+    const handler = vi.fn();
+    cleanups.push(keyboardShortcuts.registerKeyUpHandler("playback.shuttlePause", handler));
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    release("k", input);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("repeats shuttle key-down events while a key is held (slow motion needs them)", () => {
+    const handler = listen("playback.shuttleForward");
+    press("l");
+    press("l", { repeat: true });
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not repeat other edits while held", () => {
+    const handler = listen("editing.split");
+    press("s");
+    press("s", { repeat: true });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("tells blur handlers when the window loses focus", () => {
+    const handler = vi.fn();
+    cleanups.push(keyboardShortcuts.registerBlurHandler(handler));
+    window.dispatchEvent(new Event("blur"));
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("only listens for key-up inside the scope when scoped", () => {
+    const handler = vi.fn();
+    cleanups.push(keyboardShortcuts.registerKeyUpHandler("playback.shuttlePause", handler));
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    keyboardShortcuts.setScope(root);
+    release("k");
+    expect(handler).not.toHaveBeenCalled();
+    release("k", root);
+    expect(handler).toHaveBeenCalledOnce();
+    keyboardShortcuts.setScope(null);
+  });
+});
+

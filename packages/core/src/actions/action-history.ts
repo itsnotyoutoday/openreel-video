@@ -379,6 +379,17 @@ export class ActionHistory {
     this.notify();
   }
 
+  /**
+   * Forget the undo entries beyond `size` (and the redo stack): used to keep a
+   * host's post-load setup out of the person's undo history.
+   */
+  truncateUndo(size: number): void {
+    if (size >= this.undoStack.length) return;
+    this.undoStack = this.undoStack.slice(0, Math.max(0, size));
+    this.redoStack = [];
+    this.notify();
+  }
+
   getUndoStackSize(): number {
     return this.undoStack.length;
   }

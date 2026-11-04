@@ -23,6 +23,8 @@ import { useUIStore } from "../../stores/ui-store";
 import { useThemeStore } from "../../stores/theme-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useRouter } from "../../hooks/use-router";
+import { useIsEmbedded } from "../../embed/host-runtime";
+import { useChromeHidden, useHostLabel } from "../../embed/host-state";
 import {
   startTour,
   ONBOARDING_KEY,
@@ -59,7 +61,15 @@ export const EditorActionRail: React.FC = () => {
   } = useUIStore();
   const { mode: themeMode, toggleTheme } = useThemeStore();
   const { openSettings } = useSettingsStore();
+  const hideSettings = useChromeHidden("settingsAndApiKeys");
+  const hideJson = useChromeHidden("projectJson");
+  const hideAiPanel = useChromeHidden("aiPanel");
+  const hideSearch = useChromeHidden("search");
+  const hideBrand = useChromeHidden("brand");
+  const searchLabel = useHostLabel("search", "Search tools, effects, or ask AI");
+  const hideRecorder = useChromeHidden("screenRecorder");
   const { navigate } = useRouter();
+  const embedded = useIsEmbedded();
 
   const themeLabel =
     themeMode === "auto"
@@ -83,23 +93,29 @@ export const EditorActionRail: React.FC = () => {
       aria-label="Editor tools"
       className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-bg-1 py-3"
     >
-      <Tooltip content="Back to home" placement="end">
-        <IconButton
-          label="Back to home"
-          icon={<House size={16} aria-hidden />}
-          size="sm"
-          variant="ghost"
-          onClick={() => navigate("welcome")}
+      {!embedded && !hideBrand && (
+        <>
+          <Tooltip content="Back to home" placement="end">
+            <IconButton
+              label="Back to home"
+              icon={<House size={16} aria-hidden />}
+              size="sm"
+              variant="ghost"
+              onClick={() => navigate("welcome")}
+            />
+          </Tooltip>
+
+          <div className="my-1.5 h-px w-6 bg-border" />
+        </>
+      )}
+
+      {!hideSearch && (
+        <RailButton
+          label={searchLabel}
+          icon="magnifyingglass"
+          onClick={() => openModal("search")}
         />
-      </Tooltip>
-
-      <div className="my-1.5 h-px w-6 bg-border" />
-
-      <RailButton
-        label="Search tools, effects, or ask AI"
-        icon="magnifyingglass"
-        onClick={() => openModal("search")}
-      />
+      )}
       <RailButton
         label="Undo"
         icon="arrow.uturn.backward"
@@ -131,17 +147,21 @@ export const EditorActionRail: React.FC = () => {
         onClick={() => togglePanel("audioMixer")}
         active={Boolean(panels.audioMixer?.visible)}
       />
-      <RailButton
-        label="AI Editor chat"
-        icon="bubble.left.and.text.bubble.right"
-        onClick={() => togglePanel("agentChat")}
-        active={Boolean(panels.agentChat?.visible)}
-      />
-      <RailButton
-        label="Project JSON / Comments"
-        icon="curlybraces"
-        onClick={() => openModal("scriptView")}
-      />
+      {!hideAiPanel && (
+        <RailButton
+          label="AI Editor chat"
+          icon="bubble.left.and.text.bubble.right"
+          onClick={() => togglePanel("agentChat")}
+          active={Boolean(panels.agentChat?.visible)}
+        />
+      )}
+      {!hideJson && (
+        <RailButton
+          label="Project JSON / Comments"
+          icon="curlybraces"
+          onClick={() => openModal("scriptView")}
+        />
+      )}
 
       <div className="flex-1" />
 
@@ -167,23 +187,31 @@ export const EditorActionRail: React.FC = () => {
         hasChevron={false}
         menuWidth={224}
         items={[
-          {
-            label: "Settings & API keys",
-            icon: <Settings size={14} aria-hidden />,
-            onClick: () => openSettings(),
-          },
-          {
-            label: "Screen recorder",
-            icon: (
-              <Circle
-                size={14}
-                className="fill-current text-status-error"
-                aria-hidden
-              />
-            ),
-            onClick: () => openModal("recorder"),
-          },
-          { type: "divider" },
+          ...(hideSettings
+            ? []
+            : [
+                {
+                  label: "Settings & API keys",
+                  icon: <Settings size={14} aria-hidden />,
+                  onClick: () => openSettings(),
+                },
+              ]),
+          ...(hideRecorder
+            ? []
+            : [
+                {
+                  label: "Screen recorder",
+                  icon: (
+                    <Circle
+                      size={14}
+                      className="fill-current text-status-error"
+                      aria-hidden
+                    />
+                  ),
+                  onClick: () => openModal("recorder"),
+                },
+              ]),
+          ...(hideSettings && hideRecorder ? [] : [{ type: "divider" as const }]),
           {
             label: "Editor tour",
             icon: <Play size={14} aria-hidden />,
@@ -206,11 +234,15 @@ export const EditorActionRail: React.FC = () => {
             icon: <HelpCircle size={14} aria-hidden />,
             isDisabled: true,
           },
-          {
-            label: "Project JSON",
-            icon: <FileCode size={14} aria-hidden />,
-            isDisabled: true,
-          },
+          ...(hideJson
+            ? []
+            : [
+                {
+                  label: "Project JSON",
+                  icon: <FileCode size={14} aria-hidden />,
+                  isDisabled: true,
+                },
+              ]),
           {
             label: "Cmd+K to search",
             icon: <Command size={14} aria-hidden />,

@@ -983,7 +983,7 @@ describe("ProjectStore", () => {
       ]);
     });
 
-    it("moves a text item onto any unlocked row and restores it on undo", async () => {
+    it("moves a text item dropped on a row of another kind to a new row of its own kind and restores it on undo", async () => {
       const project = {
         ...mixedPlacementProject(),
         timeline: {
@@ -1019,16 +1019,156 @@ describe("ProjectStore", () => {
         .getState()
         .moveTimelineItem("title", 2, "destination");
       expect(result.success).toBe(true);
-      expect(useProjectStore.getState().project.textClips?.[0]).toMatchObject({
-        trackId: "destination",
-        startTime: 2,
-      });
+      const moved = useProjectStore.getState().project.textClips?.[0];
+      expect(moved).toMatchObject({ startTime: 2 });
+      expect(moved?.trackId).not.toBe("destination");
+      const sourceType = useProjectStore.getState().project.timeline.tracks.find((t) => t.id === "target")?.type;
+      expect(useProjectStore.getState().project.timeline.tracks.find((t) => t.id === moved?.trackId)?.type).toBe(sourceType);
 
       await useProjectStore.getState().undo();
       expect(useProjectStore.getState().project.textClips?.[0]).toMatchObject({
         trackId: "target",
         startTime: 0,
       });
+    });
+
+    it("moves several selected clips onto ONE new video row above the top video row, below text, as one undo step", async () => {
+      const base = mixedPlacementProject();
+      const videoRow = base.timeline.tracks[0];
+      const member = (id: string, startTime: number) => ({ ...videoRow.clips[0], id, startTime, duration: 1, outPoint: 1, trackId: "target" });
+      const project = {
+        ...base,
+        timeline: {
+          ...base.timeline,
+          tracks: [
+            { ...videoRow, id: "titles", type: "text" as const, name: "Text", clips: [] },
+            { ...videoRow, id: "upper", name: "Video 2", clips: [{ ...videoRow.clips[0], id: "long", trackId: "upper", startTime: 10, duration: 6, outPoint: 6 }] },
+            { ...videoRow, clips: [member("a", 0), member("b", 1)] },
+          ],
+        },
+      } as unknown as Project;
+      useProjectStore.getState().loadProject(project);
+
+      // dropped on an occupied span of another video row
+      let result = await useProjectStore.getState().moveTimelineItems(
+        [{ itemId: "a", startTime: 11 }, { itemId: "b", startTime: 12 }],
+        "upper",
+      );
+      expect(result.success).toBe(true);
+      let tracks = useProjectStore.getState().project.timeline.tracks;
+      expect(tracks.map((t) => [t.type, t.name])).toEqual([
+        ["text", "Text"],
+        ["video", "Video 3"],
+        ["video", "Video 2"],
+        ["video", "Track 1"],
+      ]);
+      expect(tracks[1].clips.map((c) => c.id).sort()).toEqual(["a", "b"]);
+      expect(tracks[0].clips).toHaveLength(0);
+
+      await useProjectStore.getState().undo();
+      tracks = useProjectStore.getState().project.timeline.tracks;
+      expect(tracks.map((t) => t.id)).toEqual(["titles", "upper", "target"]);
+      expect(tracks[2].clips.map((c) => c.id).sort()).toEqual(["a", "b"]);
+
+      // dropped on the Text row: also one new video row, never the Text row
+      result = await useProjectStore.getState().moveTimelineItems(
+        [{ itemId: "a", startTime: 0 }, { itemId: "b", startTime: 1 }],
+        "titles",
+      );
+      expect(result.success).toBe(true);
+      tracks = useProjectStore.getState().project.timeline.tracks;
+      expect(tracks[0].clips).toHaveLength(0);
+      expect(tracks[1]).toMatchObject({ type: "video", name: "Video 3" });
+      expect(tracks[1].clips.map((c) => c.id).sort()).toEqual(["a", "b"]);
+    });
+
+    const selectionProject = (rows: Array<{ id: string; type: "video" | "text" | "audio"; name: string; clips: Array<[string, number]> }>) => {
+      const base = mixedPlacementProject();
+      const template = base.timeline.tracks[0];
+      return {
+        ...base,
+        timeline: {
+          ...base.timeline,
+          tracks: rows.map((row) => ({
+            ...template,
+            id: row.id,
+            type: row.type,
+            name: row.name,
+            clips: row.clips.map(([id, startTime]) => ({ ...template.clips[0], id, trackId: row.id, startTime, duration: 1, outPoint: 1 })),
+          })),
+        },
+      } as unknown as Project;
+    };
+    const layout = () =>
+      useProjectStore.getState().project.timeline.tracks.map((t) => [t.name, t.clips.map((c) => c.id).sort().join(",")]);
+
+    it("moves a selection over several rows by one row offset, each row onto its offset row, as one undo step", async () => {
+      useProjectStore.getState().loadProject(
+        selectionProject([
+          { id: "titles", type: "text", name: "Text", clips: [] },
+          { id: "upper", type: "video", name: "Video 3", clips: [] },
+          { id: "target", type: "video", name: "Video 2", clips: [["a", 0]] },
+          { id: "lower", type: "video", name: "Video", clips: [["b", 0]] },
+        ]),
+      );
+      const result = await useProjectStore.getState().moveTimelineSelection(
+        [{ itemId: "a", startTime: 2 }, { itemId: "b", startTime: 2 }],
+        "target",
+        "upper",
+      );
+      expect(result.success).toBe(true);
+      expect(layout()).toEqual([["Text", ""], ["Video 3", "a"], ["Video 2", "b"], ["Video", ""]]);
+      expect(useProjectStore.getState().project.timeline.tracks[1].clips[0].startTime).toBe(2);
+
+      await useProjectStore.getState().undo();
+      expect(layout()).toEqual([["Text", ""], ["Video 3", ""], ["Video 2", "a"], ["Video", "b"]]);
+    });
+
+    it("gives rows whose offset row is another kind or occupied new rows of their kind, keeping their order", async () => {
+      useProjectStore.getState().loadProject(
+        selectionProject([
+          { id: "titles", type: "text", name: "Text", clips: [] },
+          { id: "target", type: "video", name: "Video 2", clips: [["a", 0], ["c", 5]] },
+          { id: "lower", type: "video", name: "Video", clips: [["b", 5]] },
+        ]),
+      );
+      // a's offset row is Text (another kind); b's offset row holds c (not selected) at the same time
+      const result = await useProjectStore.getState().moveTimelineSelection(
+        [{ itemId: "a", startTime: 5 }, { itemId: "b", startTime: 5 }],
+        "target",
+        "titles",
+      );
+      expect(result.success).toBe(true);
+      expect(layout()).toEqual([["Text", ""], ["Video 4", "a"], ["Video 3", "b"], ["Video 2", "c"], ["Video", ""]]);
+      expect(useProjectStore.getState().project.timeline.tracks.map((t) => t.type)).toEqual(["text", "video", "video", "video", "video"]);
+
+      await useProjectStore.getState().undo();
+      expect(layout()).toEqual([["Text", ""], ["Video 2", "a,c"], ["Video", "b"]]);
+    });
+
+    it("refuses to move a selection holding a move-locked clip", async () => {
+      const project = selectionProject([
+        { id: "upper", type: "video", name: "Video 2", clips: [] },
+        { id: "target", type: "video", name: "Video", clips: [["a", 0], ["b", 2]] },
+      ]);
+      (project.timeline.tracks[1].clips[1] as { locks?: unknown }).locks = { move: true };
+      useProjectStore.getState().loadProject(project);
+      const result = await useProjectStore.getState().moveTimelineSelection(
+        [{ itemId: "a", startTime: 0 }, { itemId: "b", startTime: 2 }],
+        "target",
+        "upper",
+      );
+      expect(result.error?.code).toBe("CLIP_LOCKED");
+      expect(layout()).toEqual([["Video 2", ""], ["Video", "a,b"]]);
+    });
+
+    it("names a plain added row by its kind", async () => {
+      useProjectStore.getState().loadProject(
+        selectionProject([{ id: "target", type: "video", name: "Track 1", clips: [] }]),
+      );
+      await useProjectStore.getState().addTrack("video", undefined, { mode: "standard" });
+      await useProjectStore.getState().addTrack("video", undefined, { mode: "standard" });
+      expect(useProjectStore.getState().project.timeline.tracks.map((t) => t.name)).toEqual(["Track 1", "Video 2", "Video 3"]);
     });
   });
 

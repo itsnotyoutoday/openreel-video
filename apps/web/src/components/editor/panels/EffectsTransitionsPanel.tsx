@@ -12,11 +12,13 @@ import type {
 import type { Clip, TransitionType } from "@openreel/core";
 import { getTransitionBridge } from "../../../bridges/transition-bridge";
 import { serializeEditorEffectDropPayload } from "../timeline/effect-drop";
+import { previewImage, type PreviewThumb } from "./effect-preview-media";
+import { PreviewModeToggle, useEffectPreviewMedia } from "./useEffectPreviewMedia";
 
 // ─── Effect & Transition catalogs ──────────────────────────────────
 // Each item ships with a small CSS recipe used to animate the live
-// preview thumbnail. The thumbnail itself comes from the user's
-// currently-selected clip when available, falling back to a gradient.
+// preview thumbnail. The thumbnail is a built-in demo sample (or the
+// host's stills), or the selected clip's frame when "Selected clip" is on.
 
 export type EffectCategory =
   | "Basic"
@@ -394,7 +396,7 @@ interface TransitionDef {
    *  this transition's progress p in [0, 1]. */
   renderPreview: (
     p: number,
-    thumbUrl: string | null,
+    thumbUrl: PreviewThumb | null,
   ) => React.ReactElement;
 }
 
@@ -436,14 +438,20 @@ const transitionCategory = (type: TransitionType): TransitionCategory => {
   return "Stylized";
 };
 
+// The incoming side of a transition uses the green tint (oklch(0.72 ...)).
 const renderThumb = (
-  thumbUrl: string | null,
+  thumb: PreviewThumb | null,
   style: React.CSSProperties,
   tint: string,
 ): React.ReactElement => (
   <div className="absolute inset-0 overflow-hidden" style={style}>
-    {thumbUrl ? (
-      <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
+    {thumb ? (
+      <img
+        src={previewImage(thumb, tint.startsWith("oklch(0.72") ? "b" : "a")}
+        alt=""
+        className="w-full h-full object-cover"
+        draggable={false}
+      />
     ) : (
       <div
         className="w-full h-full"
@@ -1237,7 +1245,7 @@ const PREVIEW_CYCLE_MS = 1800;
 
 const EffectCard: React.FC<{
   def: EditorEffectPreviewDef;
-  thumbUrl: string | null;
+  thumbUrl: PreviewThumb | null;
   onApply: () => void;
 }> = ({ def, thumbUrl, onApply }) => {
   const [progress, setProgress] = useState(0.72);
@@ -1301,7 +1309,7 @@ const EffectCard: React.FC<{
       >
         {thumbUrl ? (
           <img
-            src={thumbUrl}
+            src={previewImage(thumbUrl, "a")}
             alt=""
             className="absolute inset-0 w-full h-full object-cover"
             style={previewStyle}
@@ -1335,7 +1343,7 @@ const EffectCard: React.FC<{
 
 const TransitionCard: React.FC<{
   def: TransitionDef;
-  thumbUrl: string | null;
+  thumbUrl: PreviewThumb | null;
   onApply: () => void;
 }> = ({ def, thumbUrl, onApply }) => {
   const [progress, setProgress] = useState(0);
@@ -1401,56 +1409,10 @@ const TransitionCard: React.FC<{
   );
 };
 
-// ─── Hook: thumbnail of the user's currently selected clip ────────
-
-/**
- * Resolve the best available thumbnail URL from the user's current
- * selection. Falls back to the first video clip in the project, then
- * the first imported video, otherwise null (cards show gradients).
- */
-const useCurrentClipThumbnail = (): string | null => {
-  const project = useProjectStore((s) => s.project);
-  const getSelectedClipIds = useUIStore((s) => s.getSelectedClipIds);
-
-  return useMemo(() => {
-    const selectedIds = getSelectedClipIds();
-    const tracks = project.timeline.tracks;
-    const mediaItems = project.mediaLibrary.items;
-
-    const findMediaForClipId = (clipId: string): string | null => {
-      for (const track of tracks) {
-        const clip = track.clips.find((c) => c.id === clipId);
-        if (clip) {
-          const item = mediaItems.find((m) => m.id === clip.mediaId);
-          if (item?.thumbnailUrl) return item.thumbnailUrl;
-        }
-      }
-      return null;
-    };
-
-    for (const id of selectedIds) {
-      const thumb = findMediaForClipId(id);
-      if (thumb) return thumb;
-    }
-
-    // Fallback 1: first clip with a thumbnail
-    for (const track of tracks) {
-      for (const clip of track.clips) {
-        const item = mediaItems.find((m) => m.id === clip.mediaId);
-        if (item?.thumbnailUrl) return item.thumbnailUrl;
-      }
-    }
-
-    // Fallback 2: any media item with a thumbnail
-    const firstWithThumb = mediaItems.find((m) => m.thumbnailUrl);
-    return firstWithThumb?.thumbnailUrl ?? null;
-  }, [project, getSelectedClipIds]);
-};
-
 // ─── Main panel ───────────────────────────────────────────────────
 
 export const EffectsPanel: React.FC = () => {
-  const thumbUrl = useCurrentClipThumbnail();
+  const { thumb: thumbUrl, mode: previewMode, setMode: setPreviewMode } = useEffectPreviewMedia();
   const getSelectedClipIds = useUIStore((s) => s.getSelectedClipIds);
   const addVideoEffect = useProjectStore((s) => s.addVideoEffect);
 
@@ -1547,6 +1509,7 @@ export const EffectsPanel: React.FC = () => {
             );
           })}
         </div>
+        <PreviewModeToggle mode={previewMode} onChange={setPreviewMode} />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-3 pb-3 space-y-3">
@@ -1586,7 +1549,7 @@ export const EffectsPanel: React.FC = () => {
 };
 
 export const TransitionsPanel: React.FC = () => {
-  const thumbUrl = useCurrentClipThumbnail();
+  const { thumb: thumbUrl, mode: previewMode, setMode: setPreviewMode } = useEffectPreviewMedia();
   const project = useProjectStore((state) => state.project);
   const addClipTransition = useProjectStore(
     (state) => state.addClipTransition,
@@ -1749,6 +1712,7 @@ export const TransitionsPanel: React.FC = () => {
             );
           })}
         </div>
+        <PreviewModeToggle mode={previewMode} onChange={setPreviewMode} />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="space-y-3 px-3 pb-3">

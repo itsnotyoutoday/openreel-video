@@ -83,6 +83,40 @@ describe("project/media lifecycle tools", () => {
     expect((res.data as { id: string }).id).toBe("tx1");
   });
 
+  it("create_text_clip fallback builds a complete clip on a text track when given only text and timing", async () => {
+    const host = new HeadlessHost(makeEmptyProject());
+    const res = await executeTool(
+      "create_text_clip",
+      { clip: { text: "Hello", startTime: 1, duration: 2 } },
+      host,
+    );
+    expect(res.ok).toBe(true);
+
+    const project = host.getProject();
+    const textTrack = project.timeline.tracks.find((track) => track.type === "text");
+    expect(textTrack).toBeDefined();
+    const created = project.textClips?.[0];
+    expect(created).toBeDefined();
+    expect(created?.id).toEqual(expect.any(String));
+    expect(created?.trackId).toBe(textTrack?.id);
+    expect(created).toMatchObject({ text: "Hello", startTime: 1, duration: 2 });
+    expect(created?.style.fontSize).toEqual(expect.any(Number));
+    expect(created?.transform.position).toBeDefined();
+    expect(created?.keyframes).toEqual([]);
+  });
+
+  it("create_text_clip fallback reuses an existing text track and honours a supplied id", async () => {
+    const host = new HeadlessHost(makeEmptyProject());
+    await executeTool("create_text_clip", { clip: { text: "A", startTime: 0, duration: 1 } }, host);
+    await executeTool("create_text_clip", { clip: { id: "mine", text: "B", startTime: 1, duration: 1, style: { fontSize: 99 } } }, host);
+
+    const project = host.getProject();
+    expect(project.timeline.tracks.filter((track) => track.type === "text")).toHaveLength(1);
+    const second = project.textClips?.find((clip) => clip.id === "mine");
+    expect(second?.style.fontSize).toBe(99);
+    expect(second?.trackId).toBe(project.textClips?.[0].trackId);
+  });
+
   it("create_text_clip falls back to the raw action on a host without the engine method", async () => {
     const host = new HeadlessHost(makeEmptyProject());
     const res = await executeTool(

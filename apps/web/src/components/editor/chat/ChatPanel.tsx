@@ -14,6 +14,9 @@ import { ChatErrorCard } from "./ChatErrorCard";
 import { ChatHistoryPanel } from "./ChatHistoryPanel";
 import { EditSharingPanel } from "./EditSharingPanel";
 import { useAIConnectionStore } from "../../../stores/ai-connection-store";
+import { useHostAiStore } from "../../../embed/host-ai";
+import { HostAiModelPicker } from "../settings/HostAiModelPicker";
+import { useChromeHidden } from "../../../embed/host-state";
 
 const SUGGESTIONS: ReadonlyArray<string> = [
   "Add a title that says 'Welcome' for the first 3 seconds",
@@ -30,7 +33,11 @@ function EmptyState({
   const send = useChatStore((s) => s.send);
   const connection = useAIConnectionStore();
   const openSettings = useSettingsStore((s) => s.openSettings);
-  const ready = !!connection.baseUrl.trim() && !!connection.model.trim() && (!!connection.apiKey || connection.provider === "compatible");
+  const hostAi = useHostAiStore((s) => s.options);
+  const hostModel = useHostAiStore((s) => s.model);
+  const ready = hostAi
+    ? !!hostModel.trim()
+    : !!connection.baseUrl.trim() && !!connection.model.trim() && (!!connection.apiKey || connection.provider === "compatible");
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-2 text-center">
@@ -43,7 +50,7 @@ function EmptyState({
           ? "Describe an edit in plain language and the AI will perform it on your timeline."
           : "Open or create a project, then describe edits in plain language."}
       </Text>
-      {hasOpenProject && !ready && (
+      {hasOpenProject && !ready && !hostAi && (
         <Button label="Connect a model" variant="secondary" size="sm" onClick={() => openSettings("ai-editor")} className="mt-4" />
       )}
       {hasOpenProject && ready && (
@@ -80,6 +87,8 @@ export function ChatPanel({
   const clearError = useChatStore((s) => s.clearError);
   const setProjectContext = useChatStore((s) => s.setProjectContext);
   const hasOpenProject = useProjectStore((s) => s.hasOpenProject);
+  const settingsHidden = useChromeHidden("aiSettings");
+  const hostSettings = useHostAiStore((s) => Boolean(s.options?.renderSettings));
   const projectId = useProjectStore((s) => (s.hasOpenProject ? s.project.id : null));
   const openSettings = useSettingsStore((s) => s.openSettings);
 
@@ -118,14 +127,17 @@ export function ChatPanel({
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
-          <IconButton
-            label="AI settings"
-            icon={<Settings size={14} aria-hidden />}
-            size="sm"
-            variant="ghost"
-            onClick={() => openSettings("ai-editor")}
-            className="grid h-7 w-7 place-items-center rounded-md text-fg-2 transition-colors hover:bg-hover hover:text-fg"
-          />
+          <HostAiModelPicker compact disabled={busy} />
+          {(!settingsHidden || hostSettings) && (
+            <IconButton
+              label="AI settings"
+              icon={<Settings size={14} aria-hidden />}
+              size="sm"
+              variant="ghost"
+              onClick={() => openSettings("ai-editor")}
+              className="grid h-7 w-7 place-items-center rounded-md text-fg-2 transition-colors hover:bg-hover hover:text-fg"
+            />
+          )}
           {lastTurnCommitted && (
             <IconButton
               label="Undo last AI turn"

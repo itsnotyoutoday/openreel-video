@@ -4,6 +4,9 @@ node_modules/
 
 # Build outputs
 dist/
+dist-lib/
+test-results/
+playwright-report/
 build/
 .next/
 out/

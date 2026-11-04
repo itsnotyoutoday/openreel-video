@@ -70,7 +70,10 @@ export {
   isTimelineIntervalClear,
   resolveTimelinePlacement,
   timelineIntervalsOverlap,
+  topRowIndex,
   type TimelinePlacementPolicy,
   type TimelinePlacementRequest,
   type TimelinePlacementResult,
 } from "./timeline-placement";
+
+export { createEmptyRow, nextRowName, normalizeLoadedOverlaps, rowKindLabel } from "./row-placement";

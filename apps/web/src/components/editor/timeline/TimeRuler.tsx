@@ -12,6 +12,7 @@ import {
   getBeatSyncBridge,
   type BeatSyncState,
 } from "../../../bridges/beat-sync-bridge";
+import { notifyMarkerClick, useHostMarkers } from "../../../embed/host-markers";
 
 interface TimeRulerProps {
   duration: number;
@@ -53,6 +54,8 @@ export const TimeRuler: React.FC<TimeRulerProps> = ({
   const safePixelsPerSecond = pixelsPerSecond > 0 ? pixelsPerSecond : 100;
   const visibleStart = scrollX / safePixelsPerSecond;
   const visibleEnd = (scrollX + viewportWidth) / safePixelsPerSecond;
+
+  const hostMarkers = useHostMarkers((state) => state.markers);
 
   const visibleBeatMarkers = useMemo(() => {
     if (beatState.beatMarkers.length === 0) return [];
@@ -241,6 +244,38 @@ export const TimeRuler: React.FC<TimeRulerProps> = ({
           style={{ left: `${marker.time * safePixelsPerSecond}px` }}
         />
       ))}
+
+      {hostMarkers.map((marker) =>
+        marker.time >= visibleStart - 1 && marker.time <= visibleEnd + 1 ? (
+          <button
+            key={`host-marker-${marker.id}`}
+            type="button"
+            data-host-marker={marker.id}
+            aria-label={marker.label ? `Marker: ${marker.label}` : "Marker"}
+            title={marker.label}
+            className="absolute bottom-0 z-10 h-[18px] w-3 -translate-x-1/2 p-0 border-0 bg-transparent cursor-pointer"
+            style={{ left: `${marker.time * safePixelsPerSecond}px` }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSeek(marker.time);
+              notifyMarkerClick(marker);
+            }}
+          >
+            <span
+              aria-hidden
+              className="absolute left-1/2 top-0 -translate-x-1/2 w-2.5 h-2.5 rotate-45 rounded-[2px]"
+              style={{ background: marker.color ?? "var(--accent)" }}
+            />
+            <span
+              aria-hidden
+              className="absolute left-1/2 top-1 bottom-0 w-px -translate-x-1/2"
+              style={{ background: marker.color ?? "var(--accent)" }}
+            />
+          </button>
+        ) : null,
+      )}
 
       {beatState.beatAnalysis && (
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5 bg-orange-500/20 px-2 py-0.5 rounded text-[9px] text-orange-400 font-medium pointer-events-none">

@@ -1,4 +1,5 @@
 export { cn } from "./lib/utils"
+export { PortalContainerProvider, usePortalContainer } from "./lib/portal-container"
 
 export { Alert, AlertTitle, AlertDescription } from "./components/alert"
 export { Button, buttonVariants, type ButtonProps } from "./components/button"

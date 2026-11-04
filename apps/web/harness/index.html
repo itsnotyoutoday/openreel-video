@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-theme="host-theme">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenReel embed harness</title>
+    <!-- The editor's stylesheet from the library build (pnpm build:lib). -->
+    <!-- The editor stylesheet is added by harness.js (skipped with ?nocss=1, to measure the host page without it). -->
+    <style>
+      /* Host page styles: the editor must not change any of these. */
+      body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #f3e9d2; color: #222; }
+      h1 { font-size: 15px; margin: 8px 12px; }
+      #bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 12px 8px; align-items: center; }
+      #bar button, #bar input { font: inherit; padding: 3px 8px; }
+      #slot { height: 72vh; margin: 0 12px; border: 2px solid #8a6d3b; min-height: 480px; }
+      #log { height: 14vh; margin: 8px 12px; padding: 6px; overflow: auto; background: #fff; border: 1px solid #aaa; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>OpenReel embed harness (fake in-memory host)</h1>
+    <div id="bar">
+      <button id="mount" type="button">Mount</button>
+      <button id="remount-stored" type="button">Mount stored project</button>
+      <button id="unmount" type="button">Unmount</button>
+      <button id="import-tone" type="button">Import tone</button>
+      <button id="import-card" type="button">Import card</button>
+      <button id="save" type="button">Save</button>
+      <button id="add-placeholder" type="button">Add placeholder</button>
+      <button id="swap-placeholder" type="button">Swap placeholder</button>
+      <button id="theme-dark" type="button">Dark + accent</button>
+      <button id="theme-light" type="button">Light</button>
+      <button id="run-tool" type="button">Run host tool</button>
+      <input id="outside-input" placeholder="host input (outside the editor)" />
+    </div>
+    <section id="host-probe" aria-hidden="true" style="position:absolute;left:-10000px;top:0;width:320px">
+      <h2 id="probe-h2">Host heading</h2>
+      <p id="probe-p">Host paragraph <a id="probe-a" href="#probe">link</a></p>
+      <button id="probe-button" type="button">Host button</button>
+      <input id="probe-input" placeholder="host input" />
+      <ul id="probe-ul"><li id="probe-li">item</li></ul>
+      <div id="probe-flex" class="flex bg-background text-sm rounded border">class-collision flex</div>
+      <div id="probe-popover" class="bg-popover text-popover-foreground z-50 shadow-md p-4">host popover</div>
+      <div id="probe-dialog" role="dialog" class="bg-background border p-6">host dialog</div>
+      <div id="probe-hidden" class="hidden">host hidden class</div>
+      <div id="probe-dark" class="dark" data-theme="dark">host dark theme marker</div>
+      <dialog id="probe-native" open>native dialog</dialog>
+      <img id="probe-img" alt="" width="10" height="10" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" />
+    </section>
+    <div id="slot"></div>
+    <pre id="log" aria-label="Host event log"></pre>
+    <script type="module" src="./harness.js"></script>
+  </body>
+</html>

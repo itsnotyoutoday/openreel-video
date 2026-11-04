@@ -47,6 +47,8 @@ import {
   getTrackItems,
   motionEngine,
   normalizeGeneratedShaders,
+  nextRowName,
+  normalizeLoadedOverlaps,
   normalizeProjectMotionFields,
   reflowMotionAutoLayoutGroups,
   registerProjectGeneratedShaders,
@@ -76,6 +78,8 @@ import {
   initializeAutoSave,
   type AutoSaveMetadata,
 } from "../services/auto-save";
+import type { PlaceMediaOptions } from "./project/types";
+import { isHostChromeHidden } from "../embed/host-runtime";
 import { useEngineStore } from "./engine-store";
 import { useSettingsStore } from "./settings-store";
 import { useNotificationStore } from "./notification-store";
@@ -209,11 +213,34 @@ export interface ProjectState {
     mediaId: string,
     targetTrackId: string | undefined,
     startTime: number,
+    options?: PlaceMediaOptions,
   ) => Promise<ActionResult>;
   moveTimelineItem: (
     itemId: string,
     startTime: number,
     targetTrackId?: string,
+  ) => Promise<ActionResult>;
+  /**
+   * Move several items to one row as a unit: onto `targetTrackId` when it is
+   * the items' kind and every span is free there, else all onto ONE new row of
+   * their kind directly above the highest row of that kind. One undo step.
+   */
+  moveTimelineItems: (
+    moves: ReadonlyArray<{ itemId: string; startTime: number }>,
+    targetTrackId: string,
+  ) => Promise<ActionResult>;
+  /**
+   * Move a selection that spans several rows as a unit, rows shifted by the
+   * same offset as the anchor row (`anchorTrackId` to `targetTrackId`). Each
+   * source row's items land on the row at that offset when it is their kind,
+   * unlocked and free for all of them; otherwise on a NEW row of their kind
+   * (above the highest row of that kind, named like placement names rows), one
+   * new row per source row so their relative order stays. One undo step.
+   */
+  moveTimelineSelection: (
+    moves: ReadonlyArray<{ itemId: string; startTime: number }>,
+    anchorTrackId: string,
+    targetTrackId: string,
   ) => Promise<ActionResult>;
   removeClip: (clipId: string) => Promise<ActionResult>;
   moveClip: (
@@ -643,6 +670,20 @@ function motionCompositionsEqual(
 let autoSaveInitialized = false;
 let autoSaveInitializationPromise: Promise<void> | null = null;
 let autoSaveNotificationsInitialized = false;
+let autoSaveTeardown: Array<() => void> = [];
+
+/**
+ * Undo everything {@link ProjectState.initializeAutoSave} set up (interval,
+ * listeners, store subscriptions) so an embedded editor can unmount cleanly and
+ * a later mount starts from scratch.
+ */
+export function disposeProjectAutoSave(): void {
+  autoSaveTeardown.forEach((teardown) => teardown());
+  autoSaveTeardown = [];
+  autoSaveManager.stop();
+  autoSaveInitialized = false;
+  autoSaveNotificationsInitialized = false;
+}
 
 /**
  * Create the project store
@@ -1755,8 +1796,9 @@ export const useProjectStore = create<ProjectState>()(
 
       loadProject: (incomingProject: Project) => {
         const motionNormalized = normalizeProjectMotionFields(incomingProject);
+        // clips that overlap on one row settle on new rows of the same kind, never on a free row of another kind
         const project: Project = {
-          ...motionNormalized,
+          ...normalizeLoadedOverlaps(motionNormalized),
           generatedShaders: normalizeGeneratedShaders(
             motionNormalized.generatedShaders,
           ),
@@ -2254,7 +2296,8 @@ export const useProjectStore = create<ProjectState>()(
                   id: uuidv4(),
                   timestamp: Date.now(),
                   params: {
-                    trackType: "video",
+                    trackType: placement.createdTrack.type ?? "video",
+                    name: nextRowName(currentProject.timeline.tracks, placement.createdTrack.type ?? "video"),
                     trackId: placement.createdTrack.id,
                     position: placement.createdTrack.position,
                     mode: "standard",
@@ -2978,21 +3021,27 @@ export const useProjectStore = create<ProjectState>()(
           if (!autoSaveNotificationsInitialized) {
             autoSaveNotificationsInitialized = true;
             let failureNotificationId: string | null = null;
-            autoSaveManager.on("error", () => {
-              if (failureNotificationId) return;
+            const onAutoSaveError = () => {
+              if (failureNotificationId || isHostChromeHidden("localStorageWarnings")) return;
               failureNotificationId = useNotificationStore.getState().addNotification({
                 type: "warning",
                 title: "Automatic saving is unavailable",
                 message: "Your edits are still in this tab. Save a project copy and keep the original media files before closing it.",
                 duration: 0,
               });
-            });
-            autoSaveManager.on("saved", () => {
+            };
+            const onAutoSaveSaved = () => {
               if (failureNotificationId) {
                 useNotificationStore.getState().removeNotification(failureNotificationId);
                 failureNotificationId = null;
               }
-            });
+            };
+            autoSaveManager.on("error", onAutoSaveError);
+            autoSaveManager.on("saved", onAutoSaveSaved);
+            autoSaveTeardown.push(
+              () => autoSaveManager.off("error", onAutoSaveError),
+              () => autoSaveManager.off("saved", onAutoSaveSaved),
+            );
           }
           await initializeAutoSave();
           if (!autoSaveManager.isInitialized()) return;
@@ -3004,14 +3053,16 @@ export const useProjectStore = create<ProjectState>()(
             });
           };
           applyAutoSaveSettings();
-          useSettingsStore.subscribe((state, previous) => {
-            if (
-              state.autoSave !== previous.autoSave ||
-              state.autoSaveInterval !== previous.autoSaveInterval
-            ) {
-              applyAutoSaveSettings();
-            }
-          });
+          autoSaveTeardown.push(
+            useSettingsStore.subscribe((state, previous) => {
+              if (
+                state.autoSave !== previous.autoSave ||
+                state.autoSaveInterval !== previous.autoSaveInterval
+              ) {
+                applyAutoSaveSettings();
+              }
+            }),
+          );
           autoSaveManager.start(() => {
             const { project } = get();
             const titleEngine = useEngineStore.getState().getTitleEngine();
@@ -3029,11 +3080,13 @@ export const useProjectStore = create<ProjectState>()(
           // Subscribe to project state changes to mark as dirty for auto-save
           // Uses Zustand's subscribeWithSelector middleware to detect changes to project object only
           // Trigger auto-save when any project field changes (timeline, media, settings, etc.)
-          useProjectStore.subscribe(
-            (state) => state.project,
-            () => {
-              autoSaveManager.markDirty(get().getFullProject());
-            },
+          autoSaveTeardown.push(
+            useProjectStore.subscribe(
+              (state) => state.project,
+              () => {
+                autoSaveManager.markDirty(get().getFullProject());
+              },
+            ),
           );
           autoSaveInitialized = true;
         };

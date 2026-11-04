@@ -21,7 +21,9 @@ export type ToolDomain =
   | "ai"
   | "export"
   | "multicam"
-  | "raw";
+  | "raw"
+  /** Tools registered by an embedding host (see tool-extensions.ts). */
+  | "host";
 
 export interface ToolDef {
   readonly name: string;

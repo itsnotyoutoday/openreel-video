@@ -1,4 +1,4 @@
-import type { Project } from "../types";
+import type { Project, Track } from "../types";
 import { getTrackItems, isStandardTrack } from "./timeline-items";
 
 export type TimelinePlacementPolicy = "gap" | "stack-above";
@@ -10,6 +10,12 @@ export interface TimelinePlacementRequest {
   readonly policy: TimelinePlacementPolicy;
   readonly excludeItemIds?: readonly string[];
   readonly newTrackId?: string;
+  /**
+   * The kind of row the item belongs on. When the target row is another kind
+   * (a video dropped on the Text row) the item gets a NEW row of its own kind,
+   * directly above the nearest row of that kind below the target.
+   */
+  readonly itemType?: Track["type"];
 }
 
 export type TimelinePlacementResult =
@@ -17,7 +23,12 @@ export type TimelinePlacementResult =
       readonly ok: true;
       readonly trackId: string;
       readonly startTime: number;
-      readonly createdTrack?: { readonly id: string; readonly position: number };
+      /** A new row to make; `type` is the kind of the row it was made for (default video). */
+      readonly createdTrack?: {
+        readonly id: string;
+        readonly position: number;
+        readonly type?: Track["type"];
+      };
     }
   | {
       readonly ok: false;
@@ -60,6 +71,16 @@ export function isTimelineIntervalClear(
   );
 }
 
+/**
+ * Where a new row of `type` goes: directly above the highest existing row of that
+ * kind, so text and graphics rows stay on top and the new layer sits above the
+ * older layers of its kind. With no such row, `fallback`.
+ */
+export function topRowIndex(tracks: readonly Track[], type: Track["type"], fallback: number): number {
+  const at = tracks.findIndex((track) => track.type === type);
+  return at >= 0 ? at : fallback;
+}
+
 /** Resolve the destination row without mutating the project. */
 export function resolveTimelinePlacement(
   project: Project,
@@ -76,6 +97,15 @@ export function resolveTimelinePlacement(
   }
 
   const startTime = Math.max(0, request.startTime);
+  if (request.itemType && request.itemType !== target.type && request.policy !== "gap") {
+    const newTrackId = request.newTrackId ?? `track-${crypto.randomUUID()}`;
+    return {
+      ok: true,
+      trackId: newTrackId,
+      startTime,
+      createdTrack: { id: newTrackId, position: topRowIndex(project.timeline.tracks, request.itemType, targetIndex), type: request.itemType },
+    };
+  }
   if (
     !target.locked &&
     isTimelineIntervalClear(
@@ -96,6 +126,10 @@ export function resolveTimelinePlacement(
     if (
       !candidate.locked &&
       isStandardTrack(candidate) &&
+      // The track list labels rows by their type, so an item must not land on a
+      // free row of another kind (a video on the "Text" row). This holds for every
+      // project, including those that carry the universal-tracks capability.
+      candidate.type === target.type &&
       isTimelineIntervalClear(
         project,
         candidate.id,
@@ -113,6 +147,10 @@ export function resolveTimelinePlacement(
     ok: true,
     trackId: newTrackId,
     startTime,
-    createdTrack: { id: newTrackId, position: targetIndex },
+    createdTrack: {
+      id: newTrackId,
+      position: topRowIndex(project.timeline.tracks, target.type, targetIndex),
+      type: target.type,
+    },
   };
 }

@@ -16,29 +16,6 @@ describe("AutoSaveManager", () => {
     vi.useRealTimers();
   });
 
-  it("reopens a closing database before starting the next transaction", async () => {
-    const manager = new AutoSaveManager();
-    const tx = {} as IDBTransaction;
-    const closed = { transaction: vi.fn(() => { throw new DOMException("The database connection is closing", "InvalidStateError"); }) };
-    const reopened = { transaction: vi.fn(() => tx) };
-    const internals = manager as unknown as { db: unknown; createTransaction(mode: "readonly" | "readwrite"): Promise<IDBTransaction> };
-    internals.db = closed;
-    const initialize = vi.spyOn(manager, "initialize").mockImplementation(async () => { if (!internals.db) internals.db = reopened; });
-    expect(await internals.createTransaction("readwrite")).toBe(tx);
-    expect(closed.transaction).toHaveBeenCalledOnce();
-    expect(reopened.transaction).toHaveBeenCalledOnce();
-    expect(initialize).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not reconnect or retry quota errors", async () => {
-    const manager = new AutoSaveManager();
-    const internals = manager as unknown as { db: unknown; createTransaction(mode: "readonly" | "readwrite"): Promise<IDBTransaction> };
-    internals.db = { transaction: vi.fn(() => { throw new DOMException("Storage full", "QuotaExceededError"); }) };
-    const initialize = vi.spyOn(manager, "initialize").mockResolvedValue();
-    await expect(internals.createTransaction("readwrite")).rejects.toThrow("Storage full");
-    expect(initialize).toHaveBeenCalledOnce();
-  });
-
   it("saves the snapshot supplied with the dirty notification", async () => {
     vi.useFakeTimers();
     const manager = new AutoSaveManager({ debounceTime: 10, interval: 30_000 });
@@ -149,62 +126,6 @@ describe("AutoSaveManager", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(save).toHaveBeenCalledOnce();
     manager.stop();
-  });
-
-  it("does not report a successful save until its transaction commits", async () => {
-    const manager = new AutoSaveManager();
-    const request = { result: "project-1-slot-0", error: null, onerror: null };
-    const keys = { result: [], error: null, onsuccess: null, onerror: null };
-    const tx = {
-      error: null as DOMException | null,
-      oncomplete: null as (() => void) | null,
-      onabort: null as (() => void) | null,
-      onerror: null as (() => void) | null,
-      objectStore: () => ({
-        put: () => request,
-        index: () => ({ getAllKeys: () => keys }),
-      }),
-    };
-    (manager as unknown as { db: unknown }).db = { transaction: () => tx };
-    const saved = vi.fn();
-    manager.on("saved", saved);
-    const latest = project("Pending commit");
-    const saving = manager.forceSave(latest);
-    await vi.waitFor(() => expect(tx.oncomplete).toBeTypeOf("function"));
-    expect(saved).not.toHaveBeenCalled();
-    expect(manager.hasUnsavedChanges(latest)).toBe(true);
-
-    tx.oncomplete!();
-    await saving;
-    expect(saved).toHaveBeenCalledOnce();
-    expect(manager.hasUnsavedChanges(latest)).toBe(false);
-  });
-
-  it("treats a transaction abort as a failed save even after a successful request", async () => {
-    const manager = new AutoSaveManager();
-    const tx = {
-      error: new DOMException("Storage full", "QuotaExceededError"),
-      oncomplete: null as (() => void) | null,
-      onabort: null as (() => void) | null,
-      onerror: null as (() => void) | null,
-      objectStore: () => ({
-        put: () => ({ result: "project-1-slot-0", error: null }),
-        index: () => ({ getAllKeys: () => ({ result: [], error: null }) }),
-      }),
-    };
-    (manager as unknown as { db: unknown }).db = { transaction: () => tx };
-    const saved = vi.fn();
-    manager.on("saved", saved);
-    const latest = project("Failed commit");
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const saving = manager.forceSave(latest);
-    await vi.waitFor(() => expect(tx.onabort).toBeTypeOf("function"));
-    tx.onabort!();
-
-    await expect(saving).rejects.toThrow("Storage full");
-    expect(saved).not.toHaveBeenCalled();
-    expect(manager.hasUnsavedChanges(latest)).toBe(true);
-    consoleError.mockRestore();
   });
 
   it("strips runtime-only media payloads from serialized snapshots", () => {

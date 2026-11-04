@@ -5,12 +5,18 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { cn } from "@openreel/ui/lib/utils"
+import { usePortalContainer } from "@openreel/ui/lib/portal-container"
 
 const Dialog = DialogPrimitive.Root
 
 const DialogTrigger = DialogPrimitive.Trigger
 
-const DialogPortal = DialogPrimitive.Portal
+const DialogPortal = (
+  props: React.ComponentProps<typeof DialogPrimitive.Portal>
+) => {
+  const container = usePortalContainer()
+  return <DialogPrimitive.Portal container={container} {...props} />
+}
 
 const DialogClose = DialogPrimitive.Close
 
@@ -21,7 +27,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-[200] bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-[var(--z-dialog,200)] bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}
     {...props}
@@ -43,7 +49,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-[200] grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg",
+        "fixed inset-0 m-auto h-fit max-h-[calc(100dvh-2rem)] z-[var(--z-dialog,200)] grid w-full max-w-[min(32rem,calc(100vw-2rem))] gap-4 overflow-y-auto border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg",
         className
       )}
       {...props}

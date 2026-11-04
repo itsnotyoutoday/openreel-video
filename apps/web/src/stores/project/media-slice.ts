@@ -1,3 +1,4 @@
+import { isHostChromeHidden } from "../../embed/host-runtime";
 import { v4 as uuidv4 } from "uuid";
 import type { StoreApi } from "zustand";
 import type { Action, MediaItem } from "@openreel/core";
@@ -24,6 +25,12 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
   return {
     importMedia: async (file: File) => {
       const { project } = get();
+      if (get().actionExecutor?.isReadOnly?.()) {
+        return {
+          success: false,
+          error: { code: "READ_ONLY" as const, message: "The editor is read only" },
+        };
+      }
 
       try {
         const mediaBridge = getMediaBridge();
@@ -173,7 +180,7 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
           );
         } catch (err) {
           console.error("[ProjectStore] Failed to persist media blob:", err);
-          toast.warning(
+          if (!isHostChromeHidden("localStorageWarnings")) toast.warning(
             "Media could not be saved in browser storage",
             `Keep the original ${file.name} so you can relink it after reloading.`,
           );

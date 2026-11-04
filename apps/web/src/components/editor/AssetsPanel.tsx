@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon, Film, Music, Plus, Upload, Trash2,
   Square, Circle, Triangle, Star, ArrowRight, Hexagon, FileCode, AlertTriangle,
@@ -36,6 +36,11 @@ import { useKieAIStore } from "../../stores/kieai-store";
 import { StickerPickerPanel } from "./inspector/StickerPickerPanel";
 import { insertTimelineOverlay } from "../../stores/project/insert-timeline-overlay";
 import { PreviewProxyBadge, PreviewProxyControls } from "./PreviewProxyControls";
+import { useHostRuntime } from "../../embed/host-runtime";
+import { HostIcon, HostMount } from "../../embed/HostMount";
+import type { HostMediaTabApi } from "../../embed/types";
+import { importFilesToLibrary, importHostAssets, setHostDragData } from "../../embed/host-assets";
+import { handOverDroppedFiles, requestHostImport, useChromeHidden, useHostLabel } from "../../embed/host-state";
 
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
@@ -628,16 +633,27 @@ const LoadingIndicator: React.FC<{ message: string }> = ({ message }) => (
   </div>
 );
 
+type ActiveAssetsTab = AssetsTab | `host:${string}`;
+
 export const AssetsPanel: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTabRaw] = useState<AssetsTab>("media");
+  const hostRuntime = useHostRuntime();
+  const importLabel = useHostLabel("import", "Import");
+  const hideRecorder = useChromeHidden("screenRecorder");
+  const hostTabs = hostRuntime?.options.hostPanels?.mediaTabs ?? [];
+  const [activeTab, setActiveTabRaw] = useState<ActiveAssetsTab>("media");
+  // Host tabs mount the first time they are shown and stay until the editor goes.
+  const [visitedHostTabs, setVisitedHostTabs] = useState<ReadonlySet<string>>(new Set());
   const ttsHasUnsaved = useTtsAudioStore((s) => s.generatedAudio !== null && !s.isAudioSaved);
   const playheadPosition = useTimelineStore((state) => state.playheadPosition);
   const selectedIds = useUIStore((state) => state.selectedItems);
 
-  const setActiveTab = useCallback((tab: AssetsTab) => {
+  const setActiveTab = useCallback((tab: ActiveAssetsTab) => {
     if (activeTab === "ai" && tab !== "ai" && ttsHasUnsaved) {
       toast.warning("Unsaved audio discarded", "Save to media or download next time to keep it.");
+    }
+    if (tab.startsWith("host:")) {
+      setVisitedHostTabs((visited) => (visited.has(tab) ? visited : new Set(visited).add(tab)));
     }
     setActiveTabRaw(tab);
   }, [activeTab, ttsHasUnsaved]);
@@ -672,7 +688,11 @@ export const AssetsPanel: React.FC = () => {
     updateSettings,
     setKieAIItemState,
   } = useProjectStore();
-  const mediaItems = project.mediaLibrary.items;
+  // Stills the editor made for placeholder clips are not the person's media.
+  const mediaItems = useMemo(
+    () => project.mediaLibrary.items.filter((item) => !item.hostGenerated),
+    [project.mediaLibrary.items],
+  );
 
   // KieAI store
   const { retryTask } = useKieAIStore();
@@ -758,6 +778,8 @@ export const AssetsPanel: React.FC = () => {
           : [];
 
       await Promise.all(handlePromises);
+      // With hostChrome.importAction "host" dropped files go to the host.
+      if (handOverDroppedFiles(Array.from(droppedFiles))) return;
       handleFileImport(droppedFiles);
     },
     [handleFileImport],
@@ -947,6 +969,8 @@ export const AssetsPanel: React.FC = () => {
   );
 
   const triggerFileInput = useCallback(() => {
+    // With hostChrome.importAction "host" the host opens its own picker.
+    if (requestHostImport()) return;
     fileInputRef.current?.click();
   }, []);
 
@@ -1002,7 +1026,37 @@ export const AssetsPanel: React.FC = () => {
     retryTask(item.kieaiTaskId);
   }, [retryTask, setKieAIItemState]);
 
-  const renderSectionContent = (tab: AssetsTab): React.ReactNode => {
+  const hostMediaApi = useMemo<HostMediaTabApi>(
+    () => ({
+      importAssets: (ids, opts) => importHostAssets(ids.map((id) => ({ id })), opts),
+      importFiles: (files) => importFilesToLibrary(files),
+      setDragData: (event, assets) => setHostDragData(event, assets),
+      onThemeChange: (cb) => hostRuntime?.onThemeChange?.(cb) ?? (() => undefined),
+    }),
+    [hostRuntime],
+  );
+
+  const railTabs: ReadonlyArray<{
+    value: ActiveAssetsTab;
+    label: string;
+    icon: (active: boolean) => React.ReactNode;
+  }> = [
+    ...ASSETS_TABS.slice(0, 1).map((tab) => ({ value: tab.value as ActiveAssetsTab, label: tab.label, hostTab: null })),
+    ...hostTabs.map((tab) => ({ value: `host:${tab.id}` as ActiveAssetsTab, label: tab.label, hostTab: tab })),
+    ...ASSETS_TABS.slice(1).map((tab) => ({ value: tab.value as ActiveAssetsTab, label: tab.label, hostTab: null })),
+  ].map((tab) => ({
+    value: tab.value,
+    label: tab.label,
+    icon: (active: boolean) => {
+      if (tab.hostTab) {
+        return <HostIcon icon={tab.hostTab.icon} size={20} fallback={<Shapes size={20} strokeWidth={1.7} />} />;
+      }
+      const Icon = TAB_ICONS[tab.value as AssetsTab];
+      return <Icon size={20} strokeWidth={active ? 1.8 : 1.7} />;
+    },
+  }));
+
+  const renderSectionContent = (tab: ActiveAssetsTab): React.ReactNode => {
     switch (tab) {
       case "media":
         return (
@@ -1029,9 +1083,9 @@ export const AssetsPanel: React.FC = () => {
                     <path d="M12 16V4M7 9l5-5 5 5" />
                     <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
                   </svg>
-                  Import
+                  {importLabel}
                 </button>
-                <button
+                {!hideRecorder && <button
                   type="button"
                   aria-label="Record"
                   onClick={() => openModal("recorder")}
@@ -1049,7 +1103,7 @@ export const AssetsPanel: React.FC = () => {
                     <circle cx="12" cy="12" r="3" fill="var(--fg-3)" stroke="none" />
                   </svg>
                   Record
-                </button>
+                </button>}
                 <button
                   type="button"
                   aria-label="Sort media"
@@ -1530,8 +1584,7 @@ export const AssetsPanel: React.FC = () => {
     >
       {/* ── Vertical tool rail (icon + label, left) ───────────── */}
       <div className="flex flex-col items-center gap-1 px-0 py-[14px] border-r border-border bg-bg-1 overflow-y-auto scrollbar-none shrink-0 w-[92px]">
-        {ASSETS_TABS.map((tab) => {
-          const Icon = TAB_ICONS[tab.value];
+        {railTabs.map((tab) => {
           const isActive = activeTab === tab.value;
           return (
             <button
@@ -1541,13 +1594,13 @@ export const AssetsPanel: React.FC = () => {
               aria-pressed={isActive}
               title={tab.label}
               onClick={() => setActiveTab(tab.value)}
-              className={`group flex h-16 w-[68px] shrink-0 flex-col items-center justify-center gap-1 rounded-[10px] px-1 py-2 text-[10px] leading-tight tracking-tight transition-colors ${
+              className={`group flex h-16 w-[68px] shrink-0 flex-col items-center justify-center gap-1 rounded-[10px] px-1 py-2 text-[10px] leading-tight tracking-tight transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
                 isActive
                   ? "bg-selected text-accent font-semibold"
                   : "text-fg-muted font-medium"
               }`}
             >
-              <Icon size={20} strokeWidth={isActive ? 1.8 : 1.7} />
+              {tab.icon(isActive)}
               <span className="block max-w-full text-center leading-[11px]">
                 {tab.label}
               </span>
@@ -1581,13 +1634,25 @@ export const AssetsPanel: React.FC = () => {
             <div className="min-w-0 px-4 pt-[18px] pb-0 shrink-0">
               <div
                 className="truncate font-bold text-[18px] text-fg"
-                title={ASSETS_TABS.find((t) => t.value === activeTab)?.label}
+                title={railTabs.find((t) => t.value === activeTab)?.label}
               >
-                {ASSETS_TABS.find((t) => t.value === activeTab)?.label}
+                {railTabs.find((t) => t.value === activeTab)?.label}
               </div>
             </div>
           )}
           {renderSectionContent(activeTab)}
+          {hostTabs.map((tab) => {
+            const value = `host:${tab.id}`;
+            if (!visitedHostTabs.has(value)) return null;
+            return (
+              <HostMount
+                key={tab.id}
+                label={tab.label}
+                className={`min-h-0 flex-1 overflow-auto bg-bg-1 text-fg ${activeTab === value ? "" : "hidden"}`}
+                mount={(el) => tab.mount(el, hostMediaApi)}
+              />
+            );
+          })}
         </div>
       </div>
 

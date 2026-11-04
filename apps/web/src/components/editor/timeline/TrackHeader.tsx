@@ -15,7 +15,6 @@ import {
 import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import { useCompactEditor } from "../../../hooks/useCompactEditor";
-import { getTrackInfo } from "./utils";
 
 interface TrackHeaderProps {
   track: Track;
@@ -55,7 +54,14 @@ export const TrackHeader: React.FC<TrackHeaderProps> = React.memo(function Track
   const [renameValue, setRenameValue] = useState(track.name);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const trackInfo = getTrackInfo(track, index);
+  // An unnamed row is labelled by its kind and its place among rows of that kind counted from the
+  // bottom, so inserting rows above never relabels it (the label used to follow the row's index).
+  const kindRank =
+    project.timeline.tracks.filter(
+      (candidate, at) => candidate.type === track.type && at >= index,
+    ).length;
+  const kindName = track.type.charAt(0).toUpperCase() + track.type.slice(1);
+  const shownName = track.name || (kindRank > 1 ? `${kindName} ${kindRank}` : kindName);
   const isVisual = trackHasVisualItems(project, track.id);
   const isAudio = trackHasAudioItems(project, track.id);
   const hasSoloedAudioTrack = project.timeline.tracks.some(
@@ -158,6 +164,8 @@ export const TrackHeader: React.FC<TrackHeaderProps> = React.memo(function Track
     <ContextMenu items={menuItems} menuWidth={180} size="sm">
       <div
         data-timeline-track-header
+        data-track-kind={track.type}
+        data-track-name={shownName}
         draggable={!compact && !isRenaming}
         onDragStart={(e) => onDragStart(e, track.id)}
         onDragOver={onDragOver}
@@ -193,14 +201,14 @@ export const TrackHeader: React.FC<TrackHeaderProps> = React.memo(function Track
                 className="block truncate text-[13px] font-semibold text-fg-2 cursor-grab active:cursor-grabbing"
                 onDoubleClick={startRename}
               >
-                {track.name || trackInfo.label}
+                {shownName}
               </span>
             )}
           </div>
 
           {compact && <DropdownMenu
             menuWidth={220} placement="end" alignment="start" size="lg"
-            button={{ label: `Options for ${track.name || trackInfo.label}`, isIconOnly: true, variant: "ghost", icon: <MoreHorizontal size={18} aria-hidden /> }}
+            button={{ label: `Options for ${shownName}`, isIconOnly: true, variant: "ghost", icon: <MoreHorizontal size={18} aria-hidden /> }}
             items={[
               ...(isVisual ? [{ label: track.hidden ? "Show track" : "Hide track", onClick: () => hideTrack(track.id, !track.hidden) }] : []),
               ...(isAudio ? [

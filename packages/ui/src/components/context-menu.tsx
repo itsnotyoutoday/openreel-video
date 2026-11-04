@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "motion/react"
 import { Check, ChevronRight, Circle } from "lucide-react"
 
 import { cn } from "@openreel/ui/lib/utils"
+import { usePortalContainer } from "@openreel/ui/lib/portal-container"
 
 const ContextMenu = ContextMenuPrimitive.Root
 
@@ -47,7 +48,7 @@ const ContextMenuSubContent = React.forwardRef<
   <ContextMenuPrimitive.SubContent
     ref={ref}
     className={cn(
-      "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 slide-in-from-left-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+      "z-[var(--z-popup,50)] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 slide-in-from-left-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
       className
     )}
     {...props}
@@ -58,18 +59,21 @@ ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName
 const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal>
+>(({ className, ...props }, ref) => {
+  const container = usePortalContainer()
+  return (
+  <ContextMenuPrimitive.Portal container={container}>
     <ContextMenuPrimitive.Content
       ref={ref}
       className={cn(
-        "z-50 max-h-[--radix-context-menu-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+        "z-[var(--z-popup,50)] max-h-[--radix-context-menu-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
         className
       )}
       {...props}
     />
   </ContextMenuPrimitive.Portal>
-))
+  )
+})
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName
 
 const ContextMenuItem = React.forwardRef<

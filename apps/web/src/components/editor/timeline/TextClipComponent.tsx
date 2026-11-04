@@ -260,8 +260,8 @@ export const TextClipComponent: React.FC<TextClipComponentProps> = ({
           } ${
             isSelected
               ? "ring-2 ring-amber-400 border-amber-400 z-10"
-              : "border-amber-500/30 hover:border-amber-500/60 hover:brightness-110"
-          } bg-amber-500/20 border`}
+              : "border-[color:var(--clip-text-border)] hover:brightness-110"
+          } bg-[color:var(--clip-text)] border`}
           style={{
             transform: `translateX(${left}px)`,
             width: `${Math.max(width, 40)}px`,

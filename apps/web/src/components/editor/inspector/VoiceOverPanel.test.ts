@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { selectVoiceOverMimeType } from "./VoiceOverPanel";
 
 describe("selectVoiceOverMimeType", () => {
@@ -15,4 +15,11 @@ describe("selectVoiceOverMimeType", () => {
       extension: "m4a",
     });
   });
+
+  it("reports no supported type instead of throwing where MediaRecorder does not exist", () => {
+    vi.stubGlobal("MediaRecorder", undefined);
+    expect(selectVoiceOverMimeType()).toBeNull();
+  });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
 });

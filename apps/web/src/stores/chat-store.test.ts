@@ -30,6 +30,13 @@ vi.mock("@openreel/agent", () => ({
   buildSystemPrompt: () => "system",
   getTool: h.getTool,
   selectToolsForPrompt: h.selectToolsForPrompt,
+  // Host tool registration: nothing is registered in these tests.
+  listHostTools: () => [],
+  isHostTool: () => false,
+  getSchemaExtensions: () => [],
+  extensionPropertyNames: () => new Set<string>(),
+  applyExtensionsToSchema: (_name: string, schema: unknown) => schema,
+  executeTool: vi.fn(),
 }));
 
 vi.mock("../services/secure-storage", () => ({

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
 import { FontLoader, type Font } from "three/examples/jsm/loaders/FontLoader.js";
+import { assetUrl } from "../../../utils/asset-url";
 import type {
   TextClip,
   Transform,
@@ -17,8 +18,9 @@ import type { BlendMode } from "@openreel/core";
 const FONT_CACHE = new Map<string, Font>();
 const FONT_LOADING = new Map<string, Promise<Font>>();
 
-const DEFAULT_3D_FONT_URL = "/fonts/helvetiker_regular.typeface.json";
-const DEFAULT_3D_BOLD_FONT_URL = "/fonts/helvetiker_bold.typeface.json";
+// Resolved on use: the base path can depend on the embedding host.
+const DEFAULT_3D_FONT_FILE = "fonts/helvetiker_regular.typeface.json";
+const DEFAULT_3D_BOLD_FONT_FILE = "fonts/helvetiker_bold.typeface.json";
 
 /** Darken a #rrggbb / #rgb color toward black by `amount` (0..1).
  *  Used as a sensible default for the extruded "side" face when the
@@ -45,7 +47,7 @@ function darkenHex(hex: string, amount: number): string {
 function pick3DFontUrl(textClip: TextClip): string {
   const fw = textClip.style.fontWeight;
   const isBold = fw === "bold" || (typeof fw === "number" && fw >= 600);
-  return isBold ? DEFAULT_3D_BOLD_FONT_URL : DEFAULT_3D_FONT_URL;
+  return assetUrl(isBold ? DEFAULT_3D_BOLD_FONT_FILE : DEFAULT_3D_FONT_FILE);
 }
 
 /**

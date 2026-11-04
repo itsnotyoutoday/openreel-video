@@ -1,6 +1,10 @@
 import React, { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TransitionType } from "@openreel/core";
+import { usePortalContainer } from "@openreel/ui";
+import { useUIStore } from "../../../stores/ui-store";
+import { useHostRuntime } from "../../../embed/host-runtime";
+import { JOIN_PREFIX } from "../../../embed/host-clips";
 import type { ResolvedTransitionHandle } from "./transition-handles";
 import { useProjectStore } from "../../../stores/project-store";
 import { getTransitionBridge } from "../../../bridges/transition-bridge";
@@ -22,6 +26,7 @@ export const TransitionHandle: React.FC<TransitionHandleProps> = ({
   isSelected,
   onSelect,
 }) => {
+  const portalTarget = usePortalContainer() ?? document.body;
   const { centerX, transition, clipA, clipB, edge } = handle;
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<{
@@ -36,9 +41,24 @@ export const TransitionHandle: React.FC<TransitionHandleProps> = ({
   const bridge = getTransitionBridge();
   const types = bridge.getAvailableTransitionTypes();
 
+  // With a host-owned inspector the join is something the host acts on: the first click selects it
+  // (publishing the join selection, even when it has no transition yet) and the picker opens on a second
+  // click, a double click or Enter. Without one, a click opens the picker as upstream does.
+  const panels = useHostRuntime()?.options.hostPanels;
+  const hostOwnsInspector = Boolean(panels?.inspector || panels?.inspectorTabs?.length);
+  const joinId = clipB ? `${JOIN_PREFIX}${clipA}:${clipB}` : null;
+  const joinSelected = useUIStore((state) =>
+    state.selectedItems.some((item) => item.id === (transition?.id ?? joinId)),
+  );
+
   const openMenu = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (hostOwnsInspector && !joinSelected && !open && e.detail < 2) {
+        if (transition) onSelect(transition.id, trackId);
+        else if (joinId) useUIStore.getState().select({ type: "transition", id: joinId, trackId });
+        return;
+      }
       const rect = badgeRef.current?.getBoundingClientRect();
       if (!rect) return;
       const above = rect.top > 300;
@@ -50,7 +70,7 @@ export const TransitionHandle: React.FC<TransitionHandleProps> = ({
       setOpen(true);
       if (transition) onSelect(transition.id, trackId);
     },
-    [transition, onSelect, trackId],
+    [transition, onSelect, trackId, hostOwnsInspector, joinSelected, open, joinId],
   );
 
   const applyType = useCallback(
@@ -117,7 +137,7 @@ export const TransitionHandle: React.FC<TransitionHandleProps> = ({
       ? createPortal(
           <>
             <div
-              className="fixed inset-0 z-[9998]"
+              className="fixed inset-0 z-[var(--z-popup,9998)]"
               onMouseDown={(e) => {
                 e.stopPropagation();
                 setOpen(false);
@@ -125,7 +145,7 @@ export const TransitionHandle: React.FC<TransitionHandleProps> = ({
             />
             <div
               role="menu"
-              className="fixed z-[9999] rounded-lg border border-border bg-bg-1 shadow-lg overflow-hidden"
+              className="fixed z-[var(--z-popup,9999)] rounded-lg border border-border bg-bg-1 shadow-lg overflow-hidden"
               style={{
                 left: anchor.left,
                 width: MENU_WIDTH,
@@ -172,7 +192,7 @@ export const TransitionHandle: React.FC<TransitionHandleProps> = ({
               </div>
             </div>
           </>,
-          document.body,
+          portalTarget,
         )
       : null;
 

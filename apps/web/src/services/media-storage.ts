@@ -1,7 +1,8 @@
-import { StorageEngine } from "@openreel/core";
 import type { MediaRecord, MediaMetadata } from "@openreel/core";
-
-const storage = new StorageEngine();
+import {
+  getFileHandleStore,
+  getStorageProvider,
+} from "./storage/storage-context";
 
 export async function saveMediaBlob(
   projectId: string,
@@ -16,51 +17,52 @@ export async function saveMediaBlob(
     metadata,
   };
 
-  await storage.saveMedia(record);
+  await getStorageProvider().putMedia(record);
 }
 
 export async function loadMediaBlob(mediaId: string): Promise<Blob | null> {
-  const record = await storage.loadMedia(mediaId);
+  const record = await getStorageProvider().getMedia(mediaId);
   return record?.blob || null;
 }
 
 export async function loadMediaRecord(
   mediaId: string,
 ): Promise<MediaRecord | null> {
-  return storage.loadMedia(mediaId);
+  return getStorageProvider().getMedia(mediaId);
 }
 
 export async function loadProjectMedia(
   projectId: string,
 ): Promise<MediaRecord[]> {
-  return storage.getMediaByProject(projectId);
+  return getStorageProvider().listMedia(projectId);
 }
 
 export async function deleteMediaBlob(mediaId: string): Promise<void> {
-  await storage.deleteMedia(mediaId);
+  await getStorageProvider().deleteMedia(mediaId);
 }
 
 export async function deleteProjectMedia(projectId: string): Promise<void> {
-  const records = await storage.getMediaByProject(projectId);
+  const provider = getStorageProvider();
+  const records = await provider.listMedia(projectId);
   for (const record of records) {
-    await storage.deleteMedia(record.id);
+    await provider.deleteMedia(record.id);
   }
 }
 
 export async function saveFileHandle(name: string, size: number, handle: FileSystemFileHandle): Promise<void> {
-  await storage.saveFileHandle(name, size, handle);
+  await getFileHandleStore().saveFileHandle(name, size, handle);
 }
 
 export async function loadFileHandle(name: string, size: number): Promise<FileSystemFileHandle | null> {
-  return storage.loadFileHandle(name, size);
+  return getFileHandleStore().loadFileHandle(name, size);
 }
 
 export async function saveDirectoryHandle(projectId: string, handle: FileSystemDirectoryHandle): Promise<void> {
-  await storage.saveDirectoryHandle(projectId, handle);
+  await getFileHandleStore().saveDirectoryHandle(projectId, handle);
 }
 
 export async function loadDirectoryHandle(projectId: string): Promise<{ handle: FileSystemDirectoryHandle; folderName: string } | null> {
-  return storage.loadDirectoryHandle(projectId);
+  return getFileHandleStore().loadDirectoryHandle(projectId);
 }
 
 export async function getStorageStats(): Promise<{
@@ -68,16 +70,17 @@ export async function getStorageStats(): Promise<{
   quota: number;
   mediaCount: number;
 }> {
-  const usage = await storage.getStorageUsage();
+  const usage = await getStorageProvider().getUsage?.();
   return {
-    used: usage.used,
-    quota: usage.quota,
-    mediaCount: usage.mediaItems,
+    used: usage?.used ?? 0,
+    quota: usage?.quota ?? 0,
+    mediaCount: usage?.mediaItems ?? 0,
   };
 }
 
 export async function clearAllStorage(): Promise<void> {
-  await storage.clearAllData();
+  const provider = getStorageProvider();
+  await provider.clearAll?.();
 
   const databasesToDelete = ["openreel-autosave", "openreel-projects", "openreel-templates"];
   await Promise.allSettled(

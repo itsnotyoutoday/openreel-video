@@ -15,7 +15,7 @@ import type {
   FreezeFrame,
 } from "./timeline";
 import type { TransitionType } from "./effects";
-import type { Transition } from "./timeline";
+import type { ClipMetadata, Transition } from "./timeline";
 import type { BlendMode } from "../video/types";
 import type { EmphasisAnimation } from "../graphics/types";
 import type { ClipColorGrading } from "../video/color-grading-engine";
@@ -51,6 +51,10 @@ export interface ActionResult {
 // Error codes for action validation and execution
 export type ActionErrorCode =
   | "INVALID_PARAMS" // Missing or malformed parameters
+  | "READ_ONLY" // The editor was put in read-only mode by its host
+  | "GROUP_LOCKED" // The edit would break a locked clip group apart
+  | "CLIP_LOCKED" // The clip is locked against moving or trimming (Clip.locks)
+  | "HOST_VETO" // The embedding host refused the edit (beforeEdit)
   | "CLIP_NOT_FOUND" // Referenced clip doesn't exist
   | "TRACK_NOT_FOUND" // Referenced track doesn't exist
   | "TRACK_LOCKED" // Attempting to modify locked track
@@ -165,6 +169,7 @@ export type ClipAction =
         /** Pre-assigned ID keeps grouped placement deterministic on redo. */
         clipId?: string;
         duration?: number;
+        metadata?: ClipMetadata;
       };
     }
   | { type: "clip/remove"; params: { clipId: string } }
@@ -217,6 +222,22 @@ export type ClipAction =
   | {
       type: "clip/trimToPlayhead";
       params: { clipId: string; playheadTime: number; trimStart: boolean };
+    }
+  | {
+      type: "clip/setMetadata";
+      params: { clipId: string; metadata?: ClipMetadata };
+    }
+  | {
+      type: "clip/replaceMedia";
+      params: {
+        clipId: string;
+        mediaId: string;
+        duration?: number;
+        inPoint?: number;
+        outPoint?: number;
+        metadata?: ClipMetadata;
+        clearMetadata?: boolean;
+      };
     }
   | {
       type: "clip/restoreTiming";

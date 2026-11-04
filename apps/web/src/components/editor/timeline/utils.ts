@@ -297,35 +297,30 @@ export const getTrackInfo = (track: Track, index: number): TrackInfo => {
   }
 };
 
-export const getClipStyle = (trackType: string): ClipStyle => {
-  switch (trackType) {
-    case "video":
-      return {
-        bg: "bg-[linear-gradient(160deg,#bcd3e8,#5d7a93)]",
-        border: "border-transparent",
-        text: "text-white",
-        selectedText: "text-white",
-      };
-    case "audio":
-      return {
-        bg: "bg-[#e6f4ea]",
-        border: "border-[#cfe8d6]",
-        text: "text-[#4a7a55]",
-        selectedText: "text-[#4a7a55]",
-      };
-    case "image":
-      return {
-        bg: "bg-[linear-gradient(160deg,#c3b1e8,#6a4aa0)]",
-        border: "border-transparent",
-        text: "text-white",
-        selectedText: "text-white",
-      };
-    default:
-      return {
-        bg: "bg-[linear-gradient(160deg,#cdd4e0,#8a93a8)]",
-        border: "border-transparent",
-        text: "text-white",
-        selectedText: "text-white",
-      };
-  }
+/**
+ * Clip colours come from CSS tokens (`--clip-video`, `--clip-audio` for voice,
+ * `--clip-music`, `--clip-image`, `--clip-other`, each with `-border`, `-text`
+ * and, for audio, `-wave`), set for light and dark in index.css and overridable
+ * through the host's EditorTheme tokens. Music and ambience tracks use the
+ * music colours.
+ */
+export const getClipStyle = (trackType: string, role?: string): ClipStyle => {
+  const kind =
+    trackType === "audio"
+      ? role === "music" || role === "ambience"
+        ? "music"
+        : "audio"
+      : trackType === "video" || trackType === "image"
+        ? trackType
+        : "other";
+  const gradient = kind === "video" || kind === "image" || kind === "other";
+  return {
+    bg: gradient
+      ? `bg-[image:var(--clip-${kind})]`
+      : `bg-[color:var(--clip-${kind})]`,
+    border: `border-[color:var(--clip-${kind}-border)]`,
+    text: `text-[color:var(--clip-${kind}-text)]`,
+    selectedText: `text-[color:var(--clip-${kind}-text)]`,
+    wave: kind === "audio" || kind === "music" ? `var(--clip-${kind}-wave)` : undefined,
+  };
 };

@@ -3,7 +3,7 @@ import { TimelineTouchMoveHandle } from "./TimelineTouchMoveHandle";
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { ToolcraftContextMenu as ContextMenu } from "@openreel/ui";
 import { Box, Image, Layers } from "@/icons/lucide-compat";
-import type { Clip, Track, TransitionType } from "@openreel/core";
+import { resolveTimelinePlacement, type Clip, type Track, type TransitionType } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
@@ -13,6 +13,10 @@ import {
   getClipWaveformBarAmplitudes,
 } from "./utils";
 import { useClipContextMenuItems } from "./ClipContextMenu";
+import { PlaceholderClipFill } from "./PlaceholderClipFill";
+import { hostLabelOf } from "../../../embed/host-clips";
+import { ensureWaveform } from "../../../services/waveform-hydration";
+import { attemptLockedEdit, moveGroupBy, selectGroup, startGroupDrag, useClipGroupInfo } from "./clip-groups";
 import { toast } from "../../../stores/notification-store";
 import { getTransitionBridge } from "../../../bridges/transition-bridge";
 import {
@@ -145,14 +149,21 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const clipMediaType = track.type === "audio" ? "audio" : mediaItem?.type ?? track.type;
   const isVideo = clipMediaType === "video";
   const isAudio = clipMediaType === "audio";
+  const placeholder = clip.metadata?.placeholder;
   const isImage = clipMediaType === "image";
   const isMotionClip = Boolean(clip.metadata?.motionClip);
-  const clipStyle = getClipStyle(clipMediaType);
+  const groupInfo = useClipGroupInfo(clip);
+  const groupLocked = Boolean(groupInfo?.group.locked);
+  const clipStyle = getClipStyle(clipMediaType, track.role);
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     if (isDragging || isPendingDrag) return;
     e.stopPropagation();
+    if (groupInfo) {
+      selectGroup(groupInfo.memberIds);
+      return;
+    }
     onSelect(clip.id, e.shiftKey || e.metaKey);
   };
 
@@ -160,6 +171,12 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     if (touchGesture.shouldIgnoreMouse(e)) return false;
     if (e.button !== 0) return;
     if (track.locked || isTrimming) return false;
+    // a clip locked against moving can still be selected; it just does not drag
+    if (clip.locks?.move && !(groupInfo && groupLocked)) return false;
+    if (groupInfo && groupLocked) {
+      startGroupDrag(e, groupInfo, pixelsPerSecond);
+      return false;
+    }
     e.stopPropagation();
 
     const rect = clipRef.current?.parentElement?.getBoundingClientRect();
@@ -191,7 +208,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         for (const c of t.clips) {
           if (c.id === clip.id) continue;
           if (!selectedIds.includes(c.id)) continue;
-          if (t.locked) continue;
+          if (t.locked || c.locks?.move) continue;
           snapshot.push({ clipId: c.id, startTime: c.startTime, trackId: t.id });
         }
       }
@@ -399,7 +416,13 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const handleTrimMouseDown =
     (edge: "left" | "right") => (e: React.MouseEvent) => {
       if (touchGesture.shouldIgnoreMouse(e) || e.button !== 0) return false;
-      if (track.locked || !onTrimClip) return false;
+      if (track.locked || !onTrimClip || clip.locks?.trim) return false;
+      if (groupInfo && groupLocked && !(edge === "left" ? groupInfo.isFirst : groupInfo.isLast)) {
+        // an inside boundary of a locked group: refused, with a hint and onLockedAction
+        e.stopPropagation();
+        void attemptLockedEdit(clip, "trim");
+        return false;
+      }
       e.stopPropagation();
       setIsTrimming(true);
       setTrimEdge(edge);
@@ -535,6 +558,28 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
       setIsInvalidDrop(hoveredTrackIsLocked);
 
+      // Tell the row under the pointer when dropping here makes a new row, and of which kind.
+      const overId = targetTrackId ?? track.id;
+      const preview = hoveredTrackIsLocked
+        ? undefined
+        : resolveTimelinePlacement(useProjectStore.getState().project, {
+            targetTrackId: overId,
+            startTime: snapResult.time,
+            duration: clip.duration,
+            policy: "stack-above",
+            excludeItemIds: [clip.id],
+            newTrackId: "drop-preview",
+            itemType: track.type,
+          });
+      document.dispatchEvent(
+        new CustomEvent("openreel:new-track-hint", {
+          detail: {
+            trackId: preview?.ok && preview.createdTrack ? overId : null,
+            type: preview?.ok ? preview.createdTrack?.type : undefined,
+          },
+        }),
+      );
+
       pendingDropRef.current = { time: snapResult.time, targetTrackId };
 
       // Coalesce store commits to one per animation frame. A fast mouse
@@ -588,8 +633,35 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       pendingCommitRef.current = null;
       pendingCommit?.();
 
+      document.dispatchEvent(new CustomEvent("openreel:new-track-hint", { detail: { trackId: null } }));
       const { time, targetTrackId } = pendingDropRef.current;
-      await onMoveClip(clip.id, time, targetTrackId ?? track.id);
+      const companions = multiDragSnapshotRef.current.filter((snap) => snap.clipId !== clip.id);
+      // selected clips from the grabbed row travel with it as one set, onto one row
+      const rowMates = companions.filter((snap) => snap.trackId === track.id);
+      const spansRows = companions.some((snap) => snap.trackId !== track.id);
+      if (spansRows && targetTrackId && targetTrackId !== track.id) {
+        // a selection over several rows keeps its shape: every row shifts by the same offset
+        const deltaTime = time - dragStartTimeRef.current;
+        await useProjectStore.getState().moveTimelineSelection(
+          [
+            { itemId: clip.id, startTime: time },
+            ...companions.map((snap) => ({ itemId: snap.clipId, startTime: Math.max(0, snap.startTime + deltaTime) })),
+          ],
+          track.id,
+          targetTrackId,
+        );
+      } else if (rowMates.length > 0) {
+        const deltaTime = time - dragStartTimeRef.current;
+        await useProjectStore.getState().moveTimelineItems(
+          [
+            { itemId: clip.id, startTime: time },
+            ...rowMates.map((snap) => ({ itemId: snap.clipId, startTime: Math.max(0, snap.startTime + deltaTime) })),
+          ],
+          targetTrackId ?? track.id,
+        );
+      } else {
+        await onMoveClip(clip.id, time, targetTrackId ?? track.id);
+      }
 
       setIsDragging(false);
       setDragYOffset(0);
@@ -633,6 +705,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     clip.id,
     clip.duration,
     track.id,
+    track.type,
     allTracks,
     trackHeights,
     timelineRef,
@@ -726,7 +799,14 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       clip.reversed,
     ],
   );
+  // peaks are not saved with a project: compute them again for a reopened or host-loaded one
+  useEffect(() => {
+    if (isAudio && mediaItem && !mediaItem.waveformData) void ensureWaveform(mediaItem);
+  }, [isAudio, mediaItem]);
+
   const clipName =
+    hostLabelOf(clip) ||
+    placeholder?.label ||
     motionComposition?.name ||
     (typeof clip.metadata?.compoundClipName === "string"
       ? clip.metadata.compoundClipName
@@ -775,6 +855,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const isInteracting = isDragging || isTrimming;
   const isApplyingEffect = effectApplicationClipId === clip.id;
 
+  if (groupInfo?.group.collapsed) return null;
+
   return (
     <ContextMenu items={contextMenuItems} menuWidth={220} size="sm">
         <div
@@ -785,9 +867,22 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           aria-pressed={isSelected}
           onClick={handleClick}
           data-timeline-clip
+          data-clip-id={clip.id}
+          data-group-id={groupInfo?.group.id}
+          data-group-locked={groupInfo ? String(groupLocked) : undefined}
+          data-lock-move={clip.locks?.move ? "" : undefined}
+          data-lock-trim={clip.locks?.trim ? "" : undefined}
+          title={groupInfo ? `${groupInfo.group.label ?? "Scene"}${groupLocked ? " (locked)" : ""}` : undefined}
           onPointerDown={touchGesture.bodyPointerDown}
           onMouseDown={handleMouseDown}
           onKeyDown={(event) => {
+            if (groupInfo && groupLocked && !track.locked && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+              // a locked group moves as one: arrows nudge by a tenth of a second, Shift by one second
+              event.preventDefault();
+              event.stopPropagation();
+              moveGroupBy(groupInfo, (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 1 : 0.1));
+              return;
+            }
             if (track.locked || (event.key !== "Enter" && event.key !== " ")) return;
             event.preventDefault();
             event.stopPropagation();
@@ -799,7 +894,9 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           className={`group absolute top-[7px] h-12 rounded-lg overflow-hidden ${
             isDragging
               ? `cursor-grabbing z-50 ${isInvalidDrop ? "opacity-50 ring-2 ring-red-500" : "opacity-90 shadow-lg"}`
-              : "cursor-grab"
+              : groupLocked
+                ? "cursor-not-allowed"
+                : "cursor-grab"
           } ${
             isSelected && !isDragging
               ? isApplyingEffect
@@ -810,6 +907,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             track.locked ? "cursor-not-allowed opacity-60" : ""
           }`}
           style={{
+            ...(groupInfo ? { boxShadow: `inset 0 3px 0 ${groupInfo.group.color ?? "var(--accent)"}` } : {}),
             transform: isDragging
               ? `translate(${left}px, ${dragYOffset}px)`
               : `translateX(${left}px)`,
@@ -897,7 +995,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 pointer-events-none" />
       )}
 
-      {isImage && (
+      {isImage && !placeholder && (
         <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 flex items-center justify-center pointer-events-none">
           {mediaItem?.thumbnailUrl ? (
             <img
@@ -910,6 +1008,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           )}
         </div>
       )}
+
+      {placeholder && <PlaceholderClipFill info={placeholder} />}
 
       {isMotionClip && (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-r from-teal-500/30 via-cyan-500/20 to-slate-500/20 pointer-events-none">
@@ -945,6 +1045,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
       {isAudio && (
         <svg
+          data-waveform={waveformAmplitudes.length > 0 ? "ready" : "pending"}
           className="absolute left-0 bottom-0 w-full pointer-events-none"
           height="28"
           preserveAspectRatio="none"
@@ -959,7 +1060,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
                 y={28 - h}
                 width="2"
                 height={h}
-                fill="#8cc79a"
+                fill={clipStyle.wave ?? "currentColor"}
               />
             );
           })}

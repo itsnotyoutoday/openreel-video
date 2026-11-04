@@ -1,3 +1,5 @@
+import { dropHostAssets, readHostDragAssets } from "../../../embed/host-assets";
+import { GroupBands } from "./clip-groups";
 import React, { useRef, useCallback, useEffect, useState, useMemo } from "react";
 import type {
   Track,
@@ -104,6 +106,16 @@ export const TrackLane: React.FC<TrackLaneProps> = React.memo(function TrackLane
   const viewportWidth = useTimelineStore((state) => state.viewportWidth);
   const snapSettings = useUIStore((state) => state.snapSettings);
   const [isDragOver, setIsDragOver] = useState(false);
+  // a clip being dragged over this row would land on a NEW row of this kind
+  const [newTrackHint, setNewTrackHint] = useState<string | null>(null);
+  useEffect(() => {
+    const onHint = (event: Event) => {
+      const detail = (event as CustomEvent<{ trackId: string | null; type?: string }>).detail;
+      setNewTrackHint(detail.trackId === track.id && detail.type ? `New ${detail.type} track` : null);
+    };
+    document.addEventListener("openreel:new-track-hint", onHint);
+    return () => document.removeEventListener("openreel:new-track-hint", onHint);
+  }, [track.id]);
   const [dropHint, setDropHint] = useState("Drop to add clip");
   const [isResizing, setIsResizing] = useState(false);
   const laneRef = useRef<HTMLDivElement>(null);
@@ -158,17 +170,21 @@ export const TrackLane: React.FC<TrackLaneProps> = React.memo(function TrackLane
           duration,
           policy: "stack-above",
           newTrackId: "placement-preview",
+          ...(mediaItem.type === "video" || mediaItem.type === "audio" ? { itemType: mediaItem.type } : {}),
         });
+        const madeKind = placement.ok ? placement.createdTrack?.type : undefined;
         setDropHint(
-          placement.ok && placement.trackId !== track.id
-            ? "Place above"
-            : "Drop to add clip",
+          madeKind && madeKind !== track.type
+            ? `New ${madeKind} track`
+            : placement.ok && placement.trackId !== track.id
+              ? "Place above"
+              : "Drop to add clip",
         );
       } catch {
         setDropHint("Drop to add clip");
       }
     },
-    [mediaItems, pixelsPerSecond, scrollX, track.id],
+    [mediaItems, pixelsPerSecond, scrollX, track.id, track.type],
   );
 
   const handleDragLeave = useCallback(() => {
@@ -182,6 +198,23 @@ export const TrackLane: React.FC<TrackLaneProps> = React.memo(function TrackLane
       e.stopPropagation();
       setIsDragOver(false);
       setDropHint("Drop to add clip");
+
+      // Assets dragged from a host media tab: resolve, import, place here.
+      const hostAssets = readHostDragAssets(e.dataTransfer);
+      if (hostAssets) {
+        const hostRect = laneRef.current?.getBoundingClientRect();
+        if (!hostRect) return;
+        const hostTime = calculateSnap(
+          Math.max(0, (e.clientX - hostRect.left + scrollX) / pixelsPerSecond),
+          "",
+          allTracks,
+          useTimelineStore.getState().playheadPosition,
+          snapSettings,
+          pixelsPerSecond,
+        ).time;
+        void dropHostAssets(hostAssets, track.id, hostTime);
+        return;
+      }
 
       // External OS file drop (e.g. from Windows Explorer)
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -305,6 +338,7 @@ export const TrackLane: React.FC<TrackLaneProps> = React.memo(function TrackLane
     <div className="relative">
       <div
         ref={laneRef}
+        data-track-id={track.id}
         style={{ height: trackHeight }}
         className={`border-b border-border/50 relative transition-colors ${
           isDragOver
@@ -315,6 +349,7 @@ export const TrackLane: React.FC<TrackLaneProps> = React.memo(function TrackLane
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <GroupBands track={track} pixelsPerSecond={pixelsPerSecond} />
         {track.clips
           .filter((clip) => !textClips.some((tc) => tc.id === clip.id))
           .filter((clip) => !shapeClips.some((sc) => sc.id === clip.id))
@@ -398,6 +433,14 @@ export const TrackLane: React.FC<TrackLaneProps> = React.memo(function TrackLane
               onSelect={onSelectTransition}
             />
           ))}
+        {newTrackHint && (
+          <div
+            data-drop-indicator
+            className="absolute inset-0 border-2 border-dashed border-primary/60 rounded pointer-events-none flex items-center justify-center z-30"
+          >
+            <span className="text-xs text-primary bg-background/80 px-2 py-1 rounded">{newTrackHint}</span>
+          </div>
+        )}
         {isDragOver && (
           <div className="absolute inset-0 border-2 border-dashed border-primary/50 rounded pointer-events-none flex items-center justify-center">
             <span className="text-xs text-primary bg-background/80 px-2 py-1 rounded">

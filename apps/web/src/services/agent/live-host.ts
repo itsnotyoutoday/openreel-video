@@ -94,6 +94,63 @@ function inferName(url: string, mime: string): string {
   return `media-${Date.now()}.${ext}`;
 }
 
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Downloads a media URL for import. The desktop app routes through its main
+ * process (no CORS); in a plain browser the server must allow cross-origin
+ * reads, otherwise the failure is reported with that hint.
+ */
+async function fetchMediaForImport(
+  url: string,
+): Promise<{ body: BlobPart; contentType: string }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid media URL: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Only http(s) media URLs can be imported");
+  }
+
+  const bridge =
+    typeof window !== "undefined" ? window.openreel?.media?.fetchUrl : undefined;
+  if (typeof bridge === "function") {
+    const res = await bridge({ url });
+    if (!res.ok) {
+      throw new Error(res.error ?? `Download failed: HTTP ${res.status}`);
+    }
+    return { body: res.body, contentType: res.contentType };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error(
+      `Download failed (the server may not allow cross-origin requests): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`Download failed: HTTP ${response.status}`);
+  }
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  if (declared > MAX_IMPORT_BYTES) {
+    throw new Error("Media file is too large to import from a URL");
+  }
+  const blob = await response.blob();
+  if (blob.size > MAX_IMPORT_BYTES) {
+    throw new Error("Media file is too large to import from a URL");
+  }
+  return {
+    body: blob,
+    contentType: response.headers.get("content-type") ?? blob.type,
+  };
+}
+
 function projectRef(project: Project): ProjectRef {
   return {
     id: project.id,
@@ -250,22 +307,26 @@ export class LiveEditorHost implements EditingHost {
     options?: { name?: string },
   ): Promise<ImportedMediaRef> {
     this.requireOpenProject();
-    const bridge = window.openreel?.media?.fetchUrl;
-    if (typeof bridge !== "function") {
-      throw new Error("Media download is only available in the desktop app");
-    }
-    const res = await bridge({ url });
-    if (!res.ok) {
-      throw new Error(res.error ?? `Download failed: HTTP ${res.status}`);
-    }
-    const mime = (res.contentType.split(";")[0] ?? "").trim() || MIME_BY_EXT[extFromUrl(url)] || "application/octet-stream";
+    const { body, contentType } = await fetchMediaForImport(url);
+    const mime = (contentType.split(";")[0] ?? "").trim() || MIME_BY_EXT[extFromUrl(url)] || "application/octet-stream";
     const name = options?.name ?? inferName(url, mime);
-    const file = new File([res.body], name, { type: mime });
+    const file = new File([body], name, { type: mime });
     const result = await useProjectStore.getState().importMedia(file);
     if (!result.success || !result.actionId) {
       throw new Error(result.error?.message ?? "Media import failed");
     }
     const mediaId = result.actionId;
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: {
+          ...state.project.mediaLibrary,
+          items: state.project.mediaLibrary.items.map((m) =>
+            m.id === mediaId ? { ...m, originalUrl: url } : m,
+          ),
+        },
+      },
+    }));
     const item = useProjectStore
       .getState()
       .project.mediaLibrary.items.find((m) => m.id === mediaId);

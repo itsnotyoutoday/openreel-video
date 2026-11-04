@@ -10,6 +10,8 @@ import {
   FileVideo,
 } from "@/icons/lucide-compat";
 import { ToolcraftButton as Button } from "@openreel/ui";
+import { usePortalContainer } from "@openreel/ui";
+import { useChromeHidden } from "../../embed/host-state";
 import { ToolcraftCard as Card } from "@openreel/ui";
 import { ToolcraftClickableCard as ClickableCard } from "@openreel/ui";
 import { ToolcraftIconButton as IconButton } from "@openreel/ui";
@@ -37,6 +39,14 @@ function formatTimeAgo(timestamp: number): string {
 }
 
 export const ProjectSwitcher: React.FC = () => {
+  const hidden = useChromeHidden("projectMenu");
+  return hidden ? null : <ProjectSwitcherMenu />;
+};
+
+const ProjectSwitcherMenu: React.FC = () => {
+  const hideNewProject = useChromeHidden("newProject");
+  const hideBackups = useChromeHidden("projectBackups");
+  const portalTarget = usePortalContainer() ?? document.body;
   const { project, createNewProject, recoverFromAutoSave, renameProject } = useProjectStore();
   const [isOpen, setIsOpen] = useState(false);
   const [savedProjects, setSavedProjects] = useState<AutoSaveMetadata[]>([]);
@@ -195,12 +205,15 @@ export const ProjectSwitcher: React.FC = () => {
           </div>
 
           <div className="p-2">
+            {!hideBackups && (
             <ClickableCard label="Project backups" onClick={() => { setIsOpen(false); setFilesOpen(true); }} padding={3} variant="transparent"
               className="flex w-full items-start gap-3 text-left hover:bg-background-secondary">
               <FolderOpen className="h-4 w-4 shrink-0 text-primary" aria-hidden />
               <div className="min-w-0 flex-1 space-y-0.5"><Text type="supporting" display="block" className="text-sm font-medium leading-5">Project backups</Text>
                 <Text type="supporting" display="block" color="secondary" className="text-xs leading-4">Download or open a project with media</Text></div>
             </ClickableCard>
+            )}
+            {!hideNewProject && (
             <ClickableCard
               label="New Project"
               onClick={handleNewProject}
@@ -220,6 +233,7 @@ export const ProjectSwitcher: React.FC = () => {
                 </Text>
               </div>
             </ClickableCard>
+            )}
           </div>
 
           {otherProjects.length > 0 && (
@@ -281,12 +295,12 @@ export const ProjectSwitcher: React.FC = () => {
         />
       </Popover>
       {filesOpen && <ErrorBoundary fallback={createPortal(
-        <div role="alert" className="fixed right-3 top-[72px] z-[10000] max-w-sm rounded-lg border border-border bg-bg-1 p-4 text-sm text-fg shadow-lg">
+        <div role="alert" className="fixed right-3 top-[72px] z-[var(--z-popup,10000)] max-w-sm rounded-lg border border-border bg-bg-1 p-4 text-sm text-fg shadow-lg">
           <p>Project backups couldn’t open. You can keep editing, or save your project and reload the editor to try again.</p>
           <Button label="Dismiss" variant="ghost" size="sm" onClick={() => setFilesOpen(false)} className="mt-2" />
-        </div>, document.body,
+        </div>, portalTarget,
       )}>
-        <Suspense fallback={createPortal(<div role="status" className="fixed right-3 top-[72px] z-[10000] rounded-lg border border-border bg-bg-1 p-4 text-sm text-fg shadow-lg">Opening project backups…</div>, document.body)}>
+        <Suspense fallback={createPortal(<div role="status" className="fixed right-3 top-[72px] z-[var(--z-popup,10000)] rounded-lg border border-border bg-bg-1 p-4 text-sm text-fg shadow-lg">Opening project backups…</div>, portalTarget)}>
           <ProjectPackageDialog onClose={() => setFilesOpen(false)} />
         </Suspense>
       </ErrorBoundary>}

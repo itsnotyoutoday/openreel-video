@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureProjectFonts } from "./project-fonts";
+import { getHostExportHandler, warnHostAboutPlaceholders } from "../embed/host-runtime";
 import {
   getExportEngine,
   type VideoExportSettings,
@@ -247,9 +248,13 @@ async function createOpfsDownloadWritable(
   } as unknown as FileSystemWritableFileStream;
 }
 
+/** The largest export a host's `onExport` can receive; it is held in memory. */
+const HOST_EXPORT_MAX_BYTES = 1024 * 1024 * 1024;
+
 function createBufferedDownloadWritable(
   filename: string,
   mime: string,
+  delivery?: { maxBytes: number; deliver: (blob: Blob) => void | Promise<void> },
 ): FileSystemWritableFileStream {
   let buffer = new Uint8Array(1024 * 1024);
   let length = 0;
@@ -260,7 +265,7 @@ function createBufferedDownloadWritable(
     if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid export file position");
   };
   const grow = (needed: number) => {
-    if (needed > 128 * 1024 * 1024) throw new Error("This export is too large for an in-memory download. Choose a file location or enable browser storage and try again.");
+    if (needed > (delivery?.maxBytes ?? 128 * 1024 * 1024)) throw new Error("This export is too large for an in-memory download. Choose a file location or enable browser storage and try again.");
     if (needed <= buffer.length) return;
     const next = new Uint8Array(Math.max(needed, buffer.length * 2));
     next.set(buffer.subarray(0, length));
@@ -290,7 +295,9 @@ function createBufferedDownloadWritable(
     async close() {
       checkOpen();
       if (!length) throw new Error("Export produced an empty file");
-      triggerAnchorDownload(new Blob([buffer.slice(0, length)], { type: mime }), filename);
+      const blob = new Blob([buffer.slice(0, length)], { type: mime });
+      if (delivery) await delivery.deliver(blob);
+      else triggerAnchorDownload(blob, filename);
       finished = true;
       buffer = new Uint8Array(0);
     },
@@ -305,6 +312,40 @@ function createBufferedDownloadWritable(
   return sink as unknown as FileSystemWritableFileStream;
 }
 
+/**
+ * A writable that keeps the finished file in memory and hands it back, for
+ * host export targets that upload or store the file themselves.
+ */
+export function createCaptureWritable(
+  filename: string,
+  mime: string,
+): { writable: FileSystemWritableFileStream; blob: Promise<Blob> } {
+  let resolve!: (blob: Blob) => void;
+  let reject!: (error: unknown) => void;
+  const blob = new Promise<Blob>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  blob.catch(() => undefined);
+  const inner = createBufferedDownloadWritable(filename, mime, {
+    maxBytes: HOST_EXPORT_MAX_BYTES,
+    deliver: (done) => resolve(done),
+  });
+  const writable = new Proxy(inner, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === "abort" && typeof value === "function") {
+        return async (...args: unknown[]) => {
+          reject(new DOMException("Export cancelled", "AbortError"));
+          return (value as (...a: unknown[]) => Promise<void>).apply(target, args);
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { writable, blob };
+}
+
 async function createFallbackWritable(
   filename: string,
   mime: string,
@@ -317,6 +358,15 @@ export async function createDownloadWritable(
   mime: string,
   options?: { delivery?: ExportDeliveryMode },
 ): Promise<FileSystemWritableFileStream> {
+  // A host that asked for exports (events.onExport) receives the finished file
+  // instead of a download or a save dialog.
+  const hostExport = getHostExportHandler();
+  if (hostExport) {
+    return createBufferedDownloadWritable(filename, mime, {
+      maxBytes: HOST_EXPORT_MAX_BYTES,
+      deliver: (blob) => hostExport({ blob, filename, mimeType: mime }),
+    });
+  }
   const ext = filename.split(".").pop() || "mp4";
   if (options?.delivery === "download") return createFallbackWritable(filename, mime);
 
@@ -407,6 +457,14 @@ const INITIAL_STATE: ExportRunnerState = {
   complete: false,
 };
 
+/** Extra control for exports driven by a host export target. */
+export interface RunExportOptions {
+  /** Map the engine's 0..1 progress into this part of the overall bar. */
+  progressRange?: readonly [number, number];
+  /** Leave the overlay open on success; the caller completes it later. */
+  holdOpen?: boolean;
+}
+
 interface ExportRunnerOptions {
   project: Project;
   onExported?: (settings: Partial<VideoExportSettings>) => void;
@@ -418,11 +476,12 @@ export interface UseExportRunner {
     videoSettings: Partial<VideoExportSettings>,
     ext: string,
     writableStream: FileSystemWritableFileStream,
+    options?: RunExportOptions,
   ) => Promise<void>;
   runAudioExport: (settings: Partial<AudioExportSettings>, writable: FileSystemWritableFileStream) => Promise<void>;
   showSavePicker: (filename: string, ext: string, opts?: { streamToFile?: boolean; delivery?: ExportDeliveryMode }) => Promise<FileSystemWritableFileStream>;
   reportProgress: (progress01: number, phase: string) => void;
-  markComplete: () => void;
+  markComplete: (message?: string) => void;
   beginExport: (writable?: FileSystemWritableFileStream) => () => void;
   assertNotCancelled: () => void;
   finishExportSoon: () => void;
@@ -450,6 +509,7 @@ export function useExportRunner(options: ExportRunnerOptions): UseExportRunner {
       throw new Error("The previous export is still finishing. Please retry in a moment.");
     }
     if (resetTimer.current) clearTimeout(resetTimer.current);
+    warnHostAboutPlaceholders();
     epoch.current += 1;
     cancelled.current = false;
     activeWritable.current = writable ?? null;
@@ -475,10 +535,10 @@ export function useExportRunner(options: ExportRunnerOptions): UseExportRunner {
     }));
   }, []);
 
-  const markComplete = useCallback(() => {
+  const markComplete = useCallback((message?: string) => {
     assertNotCancelled();
     activeWritable.current = null;
-    setState((prev) => ({ ...prev, isExporting: false, progress: 100, complete: true, phase: "Saved!" }));
+    setState((prev) => ({ ...prev, isExporting: false, progress: 100, complete: true, phase: message ?? "Saved!" }));
   }, [assertNotCancelled]);
 
   const finishExportSoon = useCallback(() => {
@@ -511,6 +571,7 @@ export function useExportRunner(options: ExportRunnerOptions): UseExportRunner {
       videoSettings: Partial<VideoExportSettings>,
       _ext: string,
       writableStream: FileSystemWritableFileStream,
+      runOptions?: RunExportOptions,
     ): Promise<void> => {
       if (running.current) {
         await writableStream.abort().catch(() => undefined);
@@ -539,16 +600,19 @@ export function useExportRunner(options: ExportRunnerOptions): UseExportRunner {
             finalResult = value;
             break;
           }
+          const [low, high] = runOptions?.progressRange ?? [0, 1];
           setState((prev) => ({
             ...prev,
-            progress: value.progress * 100,
+            progress: (low + value.progress * (high - low)) * 100,
             phase: progressPhaseLabel(value.phase),
           }));
         }
 
         if (finalResult?.success) {
           activeWritable.current = null;
-          setState((prev) => ({ ...prev, isExporting: false, progress: 100, complete: true, phase: "Saved!" }));
+          if (!runOptions?.holdOpen) {
+            setState((prev) => ({ ...prev, isExporting: false, progress: 100, complete: true, phase: "Saved!" }));
+          }
           onExported?.(videoSettings);
         } else {
           if (finalResult?.error?.code === "CANCELLED") throw new DOMException("Export cancelled", "AbortError");

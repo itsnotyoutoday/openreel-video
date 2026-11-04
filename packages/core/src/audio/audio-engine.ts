@@ -22,6 +22,7 @@ import {
 } from "./clip-audio-resolution";
 import { scheduleVolumeAutomationOnGain } from "./clip-volume-automation";
 import { scheduleClipFadeEnvelope } from "./clip-fade-envelope";
+import { canPitchCorrect, timeStretch } from "./time-stretch";
 import { getTrackTransitionAudioFades } from "./transition-audio-fades";
 import {
   getMediaItemCapabilities,
@@ -345,7 +346,9 @@ export class AudioEngine {
     const clipStart = Math.max(clip.startTime, rangeStart);
     const clipEnd = Math.min(clip.startTime + clip.duration, rangeEnd);
     const offsetInClip = clipStart - clip.startTime;
-    const sourceTime = clip.inPoint + offsetInClip;
+    const clipSpeed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    // offsetInClip is timeline time; the source advances clipSpeed times faster.
+    const sourceTime = clip.inPoint + offsetInClip * clipSpeed;
     const clipAudioEffects = resolveClipAudioEffects(clip, timeline);
     const pan = getPanFromAudioEffects(
       clipAudioEffects.length > 0 ? clipAudioEffects : clip.effects,
@@ -368,6 +371,7 @@ export class AudioEngine {
       fadeOut: Math.max(clip.fade?.fadeOut ?? 0, transitionFades.fadeOut),
       speed: (clip as any).speed || 1,
       reversed: (clip as any).reversed || false,
+      pitchCorrection: clip.pitchCorrection,
       audioTrackIndex: clip.audioTrackIndex,
     };
   }
@@ -472,11 +476,20 @@ export class AudioEngine {
     const speed = clipInfo.speed || 1;
     const reversed = clipInfo.reversed || false;
 
-    const processedClip = await this.processClipBuffer(audioBuffer, clipInfo);
+    // Pitch correction (on unless the clip turns it off): stretch the audio in
+    // time and play it at normal rate, instead of resampling it with
+    // playbackRate, which changes the pitch along with the speed.
+    const stretched =
+      !reversed && clipInfo.pitchCorrection !== false && canPitchCorrect(speed)
+        ? this.stretchClipAudio(context, audioBuffer, clipInfo, speed)
+        : null;
+    const processedClip = stretched
+      ? { buffer: stretched, startOffset: 0, renderDuration: stretched.duration }
+      : await this.processClipBuffer(audioBuffer, clipInfo);
 
     source.buffer = processedClip.buffer;
 
-    source.playbackRate.value = reversed ? -speed : speed;
+    source.playbackRate.value = stretched ? 1 : reversed ? -speed : speed;
 
     source.connect(volumeGainNode);
     const contextStartTime = Math.max(
@@ -486,15 +499,54 @@ export class AudioEngine {
     this.applyVolumeAutomation(volumeGainNode, clipInfo, contextStartTime);
     this.applyFades(fadeGainNode, clipInfo, contextStartTime);
 
+    if (stretched) {
+      source.start(
+        contextStartTime,
+        0,
+        Math.min(clipInfo.duration, stretched.duration),
+      );
+      return;
+    }
+
     const startOffset = reversed
       ? processedClip.buffer.duration - processedClip.startOffset
       : processedClip.startOffset;
 
+    // AudioBufferSourceNode.start() duration is in SOURCE seconds (unaffected by
+    // playbackRate): a timeline span of D seconds consumes D * speed source seconds.
     source.start(
       contextStartTime,
       Math.max(0, startOffset),
-      Math.min(clipInfo.duration, processedClip.renderDuration),
+      Math.min(clipInfo.duration, processedClip.renderDuration) * speed,
     );
+  }
+
+  /**
+   * The part of the source a retimed clip needs, stretched to its timeline
+   * length at the original pitch. Null when there is nothing to stretch.
+   */
+  private stretchClipAudio(
+    context: OfflineAudioContext,
+    audioBuffer: AudioBuffer,
+    clipInfo: AudioClipRenderInfo,
+    speed: number,
+  ): AudioBuffer | null {
+    const sampleRate = audioBuffer.sampleRate;
+    const startSample = Math.max(0, Math.floor(clipInfo.sourceTime * sampleRate));
+    const endSample = Math.min(
+      audioBuffer.length,
+      startSample + Math.ceil(clipInfo.duration * speed * sampleRate),
+    );
+    if (endSample - startSample < 2) return null;
+
+    const channels: Float32Array[] = [];
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+      channels.push(audioBuffer.getChannelData(channel).subarray(startSample, endSample));
+    }
+    const stretched = timeStretch(channels, sampleRate, speed);
+    const output = context.createBuffer(stretched.length, stretched[0].length, sampleRate);
+    stretched.forEach((data, channel) => output.getChannelData(channel).set(data));
+    return output;
   }
 
   private shouldUseSegmentedAudioDecoding(

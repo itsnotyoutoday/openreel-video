@@ -31,6 +31,8 @@ export interface Project {
   readonly settings: ProjectSettings;
   readonly mediaLibrary: MediaLibrary;
   readonly timeline: Timeline;
+  /** Groups of clips; a locked group keeps its chain intact. Host-provided or set from the host API. */
+  readonly clipGroups?: ClipGroup[];
   readonly textClips?: TextClip[];
   readonly shapeClips?: ShapeClip[];
   readonly svgClips?: SVGClip[];
@@ -54,6 +56,28 @@ export interface MediaLibrary {
   readonly items: MediaItem[];
 }
 
+/**
+ * A named set of clips (for example a scene). While `locked`, its clips move,
+ * delete and retime as a unit: inside boundaries cannot be moved, trimmed,
+ * split or rippled, but the outer start and end can be trimmed and per-clip
+ * effects, volume and colour stay editable.
+ */
+export interface ClipGroup {
+  readonly id: string;
+  readonly locked: boolean;
+  readonly label?: string;
+  /** CSS colour of the bracket and band on the timeline. */
+  readonly color?: string;
+  readonly collapsed?: boolean;
+  /**
+   * Members, as clip ids. Only read when the groups are set (`project/setClipGroups`,
+   * `editor.setClipGroups`): the clips get this group's id as `groupId` and every other
+   * clip of the group is released, so one call defines the groups and their membership.
+   * Not stored on the group; membership lives on the clips.
+   */
+  readonly clipIds?: readonly string[];
+}
+
 export interface MediaItem {
   readonly id: string;
   readonly name: string;
@@ -65,6 +89,8 @@ export interface MediaItem {
   readonly waveformData: Float32Array | null;
   readonly filmstripThumbnails?: FilmstripThumbnail[];
   readonly isPlaceholder?: boolean;
+  /** Created by the editor for a host placeholder clip; kept out of the media list. */
+  readonly hostGenerated?: boolean;
   readonly originalUrl?: string;
   /** File hint stored in JSON for cross-session/cross-machine asset matching */
   readonly sourceFile?: { name: string; size: number; lastModified: number; folder?: string };

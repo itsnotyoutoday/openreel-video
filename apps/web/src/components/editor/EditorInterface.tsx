@@ -1,3 +1,8 @@
+import { useTimelineStore } from "../../stores/timeline-store";
+import { useChromeHidden } from "../../embed/host-state";
+import { LockedHint } from "./timeline/clip-groups";
+import { useHostRuntime, useIsEmbedded } from "../../embed/host-runtime";
+import { fitTrackHeight, insetStyle, resolveLayout, timelineRowSize } from "../../embed/layout";
 import "./ai-workspace.css";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { ToolcraftText as Text, ToolcraftButton as Button } from "@openreel/ui";
@@ -191,14 +196,48 @@ export const EditorInterface: React.FC = () => {
   );
 
   // ── Layout state (resizable columns and timeline band) ──────────
+  const hostLayout = resolveLayout(useHostRuntime()?.options.layout);
+  const hideInspector = useChromeHidden("inspector");
+  const hostTrackHeight = hostLayout?.trackHeight;
+  const showAllTracks = hostLayout?.timelineHeight === "auto";
+  const wantedTracks = hostLayout?.minVisibleTracks === "all" ? undefined : (hostLayout?.minVisibleTracks ?? 4);
+  const trackCount = useProjectStore((state) => state.project.timeline.tracks.length);
+  useEffect(() => {
+    if (hostTrackHeight && !showAllTracks) useTimelineStore.getState().setTrackHeight(hostTrackHeight);
+  }, [hostTrackHeight, showAllTracks]);
+  // minVisibleTracks "all": shrink the rows so every track fits, as the editor or the track count changes
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!showAllTracks || !element) return undefined;
+    const fit = () => {
+      // the timeline's share is a share of the workspace under the top bar
+      const workspace = element.querySelector<HTMLElement>(".editor-workspace");
+      useTimelineStore
+        .getState()
+        .setTrackHeight(
+          fitTrackHeight(workspace?.clientHeight ?? element.clientHeight, wantedTracks ?? trackCount, hostTrackHeight ?? 56),
+        );
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [showAllTracks, trackCount, wantedTracks, hostTrackHeight]);
   const rootRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<ResizeTarget | null>(null);
-  const [mediaWidth, setMediaWidth] = useState(() => window.innerWidth < 1600 ? MIN_MEDIA_W : DEFAULT_MEDIA_W);
-  const [inspectorWidth, setInspectorWidth] = useState(() => window.innerWidth < 1600 ? MIN_INSPECTOR_W : DEFAULT_INSPECTOR_W);
+  const [mediaWidth, setMediaWidth] = useState(() => hostLayout?.panels?.mediaWidth ?? (window.innerWidth < 1600 ? MIN_MEDIA_W : DEFAULT_MEDIA_W));
+  const [inspectorWidth, setInspectorWidth] = useState(() => hostLayout?.panels?.inspectorWidth ?? (window.innerWidth < 1600 ? MIN_INSPECTOR_W : DEFAULT_INSPECTOR_W));
   const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_W);
   const [timelineVh, setTimelineVh] = useState(DEFAULT_TIMELINE_VH);
 
-  const chatVisible = panels.agentChat?.visible ?? false;
+  const hideAiPanel = useChromeHidden("aiPanel");
+  const hideHeader = useChromeHidden("header");
+  const embedded = useIsEmbedded();
+  // Embedded, the editor is not the whole window: size the timeline against its own box, not the viewport.
+  const timelineUnit = embedded ? "%" : "vh";
+  const corners = hostLayout?.reservedCorners;
+  const stageRow = hostLayout?.previewMinHeight ? `minmax(${hostLayout.previewMinHeight}px, 1fr)` : "1fr";
+  const chatVisible = !hideAiPanel && (panels.agentChat?.visible ?? false);
   useEffect(() => {
     if (chatVisible) {
       setHasOpenedChat(true);
@@ -340,18 +379,25 @@ export const EditorInterface: React.FC = () => {
   const effectiveTimelineVh = timelineMaximized
     ? COMPACT_TIMELINE_VH
     : timelineVh;
+  const timelineRow = timelineRowSize(hostLayout, trackCount) ?? `${effectiveTimelineVh}${timelineUnit}`;
   const gridStyle: React.CSSProperties = compact
     ? { gridTemplateColumns: "minmax(0, 1fr)", gridTemplateRows: "minmax(220px, 48%) minmax(0, 1fr)", gridTemplateAreas: `'stage' '${compactPanel}'` }
     : chatVisible
     ? {
         gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px minmax(0, 1fr) ${RESIZE_HANDLE}px ${chatWidth}px`,
-        gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
+        gridTemplateRows: `${stageRow} ${RESIZE_HANDLE}px ${timelineRow}`,
         gridTemplateAreas:
           "'media mh stage ch chat' 'th th th th th' 'timeline timeline timeline timeline timeline'",
       }
+    : hideInspector
+    ? {
+        gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px minmax(0, 1fr)`,
+        gridTemplateRows: `${stageRow} ${RESIZE_HANDLE}px ${timelineRow}`,
+        gridTemplateAreas: "'media mh stage' 'th th th' 'timeline timeline timeline'",
+      }
     : {
         gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px 1fr ${RESIZE_HANDLE}px ${inspectorWidth}px`,
-        gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
+        gridTemplateRows: `${stageRow} ${RESIZE_HANDLE}px ${timelineRow}`,
         gridTemplateAreas:
           "'media mh stage ih inspector' 'th th th th th' 'timeline timeline timeline timeline timeline'",
       };
@@ -360,14 +406,28 @@ export const EditorInterface: React.FC = () => {
     <div
       ref={rootRef}
       className={`editor-shell w-full h-full bg-bg text-fg overflow-hidden font-sans select-none relative z-20 flex flex-col ${compact ? "editor-compact" : ""}`}
+      style={insetStyle(hostLayout)}
     >
-      <Toolbar />
+      {(
+        corners?.topLeft || corners?.topRight ? (
+          <div style={{ paddingLeft: corners.topLeft?.width, paddingRight: corners.topRight?.width }}>
+            <Toolbar />
+          </div>
+        ) : (
+          <Toolbar />
+        )
+      )}
+      <LockedHint />
 
       <div className="editor-body flex-1 min-h-0 flex">
         <div className="editor-rail" hidden={compact && compactPanel !== "media"}><EditorActionRail /></div>
         <div
           className={`editor-workspace flex-1 min-w-0 min-h-0 grid gap-0 bg-bg p-2.5 ${chatVisible && !compact ? "ai-workspace-grid" : ""}`}
-          style={gridStyle}
+          style={
+            hideHeader && (corners?.topLeft || corners?.topRight)
+              ? { ...gridStyle, paddingTop: Math.max(corners.topLeft?.height ?? 0, corners.topRight?.height ?? 0) + 10 }
+              : gridStyle
+          }
         >
         <div
           id="editor-panel-media"
@@ -404,7 +464,7 @@ export const EditorInterface: React.FC = () => {
           </PanelErrorBoundary>
         </div>
 
-        {!chatVisible && <><div
+        {!chatVisible && !hideInspector && <><div
           hidden={compact}
           className="editor-resizer grid place-items-center cursor-col-resize group/h"
           style={{ gridArea: "ih" }}
@@ -477,7 +537,7 @@ export const EditorInterface: React.FC = () => {
           id="editor-panel-timeline"
           hidden={compact && compactPanel !== "timeline"}
           className="editor-panel bg-tl-bg min-w-0 min-h-0 overflow-hidden flex flex-col rounded-xl border border-border shadow-sm"
-          style={{ gridArea: "timeline" }}
+          style={{ gridArea: "timeline", marginLeft: corners?.bottomLeft?.width, marginRight: corners?.bottomRight?.width }}
         >
           {panels.audioMixer?.visible && (
             <div className="shrink-0 border-b border-border">

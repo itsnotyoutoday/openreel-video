@@ -32,6 +32,13 @@ import type {
   MotionComposition,
   MotionCompositionInstance,
 } from "@openreel/core";
+
+/** Extras for placing a media clip: a fixed id, a length, host metadata. */
+export interface PlaceMediaOptions {
+  readonly clipId?: string;
+  readonly duration?: number;
+  readonly metadata?: import("@openreel/core").ClipMetadata;
+}
 import { ActionExecutor, ActionHistory } from "@openreel/core";
 import type {
   VideoEffect,
@@ -169,6 +176,7 @@ export interface ProjectState {
     mediaId: string,
     targetTrackId: string | undefined,
     startTime: number,
+    options?: PlaceMediaOptions,
   ) => Promise<ActionResult>;
   moveTimelineItem: (
     itemId: string,

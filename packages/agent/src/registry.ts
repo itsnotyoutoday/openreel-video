@@ -1,4 +1,7 @@
 import type { Action } from "@openreel/core/types/actions";
+import { TitleEngine } from "@openreel/core/text/title-engine";
+import type { TextClip, TextStyle } from "@openreel/core/text/types";
+import type { Transform } from "@openreel/core/types/timeline";
 import {
   DEFAULT_SHAPE_STYLE,
   SHAPE_TYPES,
@@ -324,6 +327,12 @@ import type {
   MotionRenderQueueAddInput,
 } from "./host";
 import type { JSONSchema, ToolDef, ToolDomain, ToolResult } from "./types";
+import {
+  configureBuiltinLookup,
+  extendTool,
+  getHostTool,
+  listHostTools,
+} from "./tool-extensions";
 import {
   serializeEditorState,
   listMedia,
@@ -15752,15 +15761,45 @@ const TOOLS: RegisteredTool[] = [
         });
         return ok(`Created text "${text}"${animation ? ` (${animation})` : ""}`, ref);
       }
+      // Hosts without an engine-aware path get a complete TextClip (id, style,
+      // transform, text track) rather than the caller's partial payload.
+      const findTextTrackId = () =>
+        host.getProject().timeline.tracks.find((track) => track.type === "text")?.id;
+      let trackId = typeof clip.trackId === "string" ? clip.trackId : findTextTrackId();
+      if (!trackId) {
+        const added = await host.applyAction({
+          type: "track/add",
+          id: genId(),
+          timestamp: Date.now(),
+          params: { trackType: "text", position: 0 },
+        });
+        if (!added.success) {
+          return fail(added.error?.message ?? "Could not create a text track", added.error?.code);
+        }
+        trackId = findTextTrackId();
+        if (!trackId) return fail("Could not create a text track", "INTERNAL");
+      }
+      const built = new TitleEngine().createTextClip({
+        id: typeof clip.id === "string" ? clip.id : undefined,
+        trackId,
+        text,
+        startTime: typeof clip.startTime === "number" ? clip.startTime : 0,
+        duration: typeof clip.duration === "number" ? clip.duration : undefined,
+        style: clip.style as Partial<TextStyle> | undefined,
+        transform: clip.transform as Partial<Transform> | undefined,
+      });
+      const complete = (
+        clip.animation !== undefined ? { ...built, animation: clip.animation } : built
+      ) as TextClip;
       const action: Action = {
         type: "text/create",
         id: genId(),
         timestamp: Date.now(),
-        params: { clip },
+        params: { clip: complete },
       };
       const result = await host.applyAction(action);
       return result.success
-        ? ok(`Created text "${text}"`, { actionId: result.actionId })
+        ? ok(`Created text "${text}"`, { actionId: result.actionId, id: complete.id, trackId })
         : fail(result.error?.message ?? "text/create failed", result.error?.code);
     },
   },
@@ -32163,13 +32202,16 @@ const TOOLS: RegisteredTool[] = [
 
 // ---- Registry --------------------------------------------------------------
 const REGISTRY = new Map<string, RegisteredTool>(TOOLS.map((t) => [t.name, t]));
+configureBuiltinLookup((name) => REGISTRY.has(name));
 
+/** Look up a tool, built-in or registered by a host, with schema extensions applied. */
 export function getTool(name: string): RegisteredTool | undefined {
-  return REGISTRY.get(name);
+  const tool = REGISTRY.get(name) ?? getHostTool(name);
+  return tool && extendTool(tool);
 }
 
 export function listTools(): RegisteredTool[] {
-  return [...REGISTRY.values()];
+  return [...REGISTRY.values(), ...listHostTools()].map((tool) => extendTool(tool));
 }
 
 export function toolDefs(): ToolDef[] {

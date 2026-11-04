@@ -23,6 +23,8 @@ export interface ClipStyle {
   border: string;
   text: string;
   selectedText: string;
+  /** Waveform fill (a CSS colour) for audio clips. */
+  wave?: string;
 }
 
 export interface TrackInfo {

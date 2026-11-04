@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, CheckCircle2, XCircle, AlertTriangle, Info } from "@/icons/lucide-compat";
+import { getHostRuntime } from "../embed/host-runtime";
 import {
   useNotificationStore,
   type NotificationType,
@@ -89,7 +90,7 @@ const ToastItem = React.forwardRef<HTMLDivElement, ToastItemProps>(
   const [progress, setProgress] = useState(100);
   const isDark =
     typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark");
+    (getHostRuntime()?.root ?? document.documentElement).classList.contains("dark");
   const theme = isDark ? "dark" : "light";
   const config = THEME_CONFIG[notification.type][theme];
   const duration = notification.duration || 4000;
@@ -213,7 +214,7 @@ export const ToastContainer: React.FC = () => {
 
   return (
     <div
-      className="fixed top-4 right-4 z-[9999] flex flex-col gap-3"
+      className="fixed top-4 right-4 z-[var(--z-toast,9999)] flex flex-col gap-3"
       role="region"
       aria-label="Notifications"
     >

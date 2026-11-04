@@ -1,0 +1,35 @@
+/* Typography and colour for the embedded editor root. These replace the
+   page-level body rules of the standalone app (see ../standalone.css). */
+[data-openreel-root] {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: var(--d-text);
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+}
+
+/* Read-only mode (editor.setReadOnly / the readOnly option): the root carries data-readonly.
+   Editing controls in the panels and the top bar stop taking input; menus, tabs, playback and
+   zoom keep working. The action system refuses edits as well; this is what the person sees. */
+[data-openreel-root][data-readonly] :is(.editor-panel, header) :is(
+    input:not([type="range"][data-readonly-ok]),
+    textarea,
+    select,
+    [contenteditable="true"],
+    [role="slider"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="spinbutton"],
+    [role="combobox"],
+    button[aria-label="Import media"],
+    button[aria-label="Record"],
+    button[aria-label="Add media"],
+    button[aria-label="Add to timeline"]
+  ) {
+  pointer-events: none;
+  opacity: 0.55;
+}

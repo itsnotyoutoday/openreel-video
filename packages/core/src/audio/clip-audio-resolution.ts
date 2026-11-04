@@ -64,6 +64,22 @@ export const resolveClipAudioEffects = (
   return linkedClip?.clip.audioEffects ?? [];
 };
 
+/**
+ * Volume keyframes (Keyframes panel, `add_keyframe` with property "volume")
+ * feed the same automation lane as `clip.automation.volume`. Keyframe time is
+ * clip-local seconds and the value is an absolute gain.
+ */
+const getVolumeKeyframePoints = (clip: Clip): AutomationPoint[] =>
+  (clip.keyframes ?? [])
+    .filter(
+      (keyframe) =>
+        keyframe.property === "volume" && typeof keyframe.value === "number",
+    )
+    .map((keyframe) => ({
+      time: keyframe.time,
+      value: keyframe.value as number,
+    }));
+
 export const resolveClipVolumeAutomation = (
   clip: Clip,
   timeline: TimelineWithTracks,
@@ -73,11 +89,27 @@ export const resolveClipVolumeAutomation = (
     return directAutomation;
   }
 
-  const linkedClip = getLinkedAudioClips(clip, timeline).find(
+  const directKeyframes = getVolumeKeyframePoints(clip);
+  if (directKeyframes.length > 0) {
+    return directKeyframes;
+  }
+
+  const linkedClips = getLinkedAudioClips(clip, timeline);
+  const linkedAutomation = linkedClips.find(
     (entry) => (entry.clip.automation?.volume?.length ?? 0) > 0,
   );
+  if (linkedAutomation) {
+    return linkedAutomation.clip.automation?.volume ?? [];
+  }
 
-  return linkedClip?.clip.automation?.volume ?? [];
+  for (const entry of linkedClips) {
+    const linkedKeyframes = getVolumeKeyframePoints(entry.clip);
+    if (linkedKeyframes.length > 0) {
+      return linkedKeyframes;
+    }
+  }
+
+  return [];
 };
 
 export const resolveAudibleAudioTarget = (

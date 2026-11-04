@@ -5,6 +5,7 @@ import { X, Copy, Clipboard, Trash2 } from "@/icons/lucide-compat";
 import { ToolcraftButton as Button } from "@openreel/ui";
 import { ToolcraftIconButton as IconButton } from "@openreel/ui";
 import { ToolcraftSelectControl as Selector } from "@openreel/ui";
+import { readCssVar } from "../../utils/css-token";
 import { ToolcraftText as Text } from "@openreel/ui";
 
 const PROPERTY_COLORS: Record<string, string> = {
@@ -181,10 +182,10 @@ export const KeyframeEditorPanel: React.FC<KeyframeEditorPanelProps> = ({
     canvas.height = GRAPH_HEIGHT * dpr;
     ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = "#1a1a1a";
+    ctx.fillStyle = readCssVar("--graph-bg", "#1a1a1a");
     ctx.fillRect(0, 0, graphWidth, GRAPH_HEIGHT);
 
-    ctx.strokeStyle = "#333";
+    ctx.strokeStyle = readCssVar("--graph-grid", "#333333");
     ctx.lineWidth = 1;
     for (let i = 0; i <= 10; i++) {
       const x = GRAPH_PADDING + (i / 10) * (graphWidth - GRAPH_PADDING * 2);
@@ -201,7 +202,7 @@ export const KeyframeEditorPanel: React.FC<KeyframeEditorPanelProps> = ({
       ctx.stroke();
     }
 
-    ctx.strokeStyle = "#555";
+    ctx.strokeStyle = readCssVar("--graph-axis", "#555555");
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(GRAPH_PADDING, GRAPH_HEIGHT - GRAPH_PADDING);
@@ -209,7 +210,7 @@ export const KeyframeEditorPanel: React.FC<KeyframeEditorPanelProps> = ({
     ctx.lineTo(graphWidth - GRAPH_PADDING, GRAPH_PADDING);
     ctx.stroke();
 
-    ctx.fillStyle = "#888";
+    ctx.fillStyle = readCssVar("--graph-label", "#888888");
     ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
     for (let i = 0; i <= 5; i++) {
@@ -272,7 +273,7 @@ export const KeyframeEditorPanel: React.FC<KeyframeEditorPanelProps> = ({
       ctx.fillRect(-6, -6, 12, 12);
 
       if (isSelected) {
-        ctx.strokeStyle = "#fff";
+        ctx.strokeStyle = readCssVar("--graph-line", "#ffffff");
         ctx.lineWidth = 2;
         ctx.strokeRect(-6, -6, 12, 12);
 

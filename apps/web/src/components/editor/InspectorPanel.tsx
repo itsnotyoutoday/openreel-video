@@ -53,8 +53,11 @@ import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
 import { TransitionInspector } from "./inspector/TransitionInspector";
 import { MultiClipInspector } from "./inspector/MultiClipInspector";
+import { GroupSelectionSummary, selectedLockedGroup } from "./inspector/group-selection";
 import { QuickEditBar } from "./QuickEditBar";
 import { useInspectorNavigationStore } from "../../stores/inspector-navigation-store";
+import { HostInspectorTabs } from "../../embed/HostInspector";
+import { hostLabelOf } from "../../embed/host-clips";
 
 const MultiCameraPanel = React.lazy(() => import("./inspector/MultiCameraPanel"));
 
@@ -119,7 +122,7 @@ const EmptyState: React.FC = () => (
   </div>
 );
 
-export const InspectorPanel: React.FC = () => {
+const NativeInspectorPanel: React.FC = () => {
   // Stores
   const {
     getClip,
@@ -159,6 +162,11 @@ export const InspectorPanel: React.FC = () => {
   const selectedClipIds = useMemo(() => selectedItems.filter((item) =>
     item.type === "clip" || item.type === "text-clip" || item.type === "shape-clip",
   ).map((item) => item.id), [selectedItems]);
+  // A selected locked group is one item: no batch tools for its members.
+  const lockedGroupSelection = useMemo(
+    () => selectedLockedGroup(project, selectedClipIds),
+    [project, selectedClipIds],
+  );
   const pausePlayback = useTimelineStore((state) => state.pause);
   const lockPlayback = useTimelineStore((state) => state.lockPlayback);
   const unlockPlayback = useTimelineStore((state) => state.unlockPlayback);
@@ -860,6 +868,7 @@ export const InspectorPanel: React.FC = () => {
       {selectedClip && tabIds.length > 0 && (
         <InspectorClipHeader
           name={
+            hostLabelOf(selectedClip as { metadata?: { host?: Record<string, unknown> } }) ??
             project.mediaLibrary.items.find(
               (m) => m.id === selectedClip.mediaId,
             )?.name ??
@@ -884,7 +893,9 @@ export const InspectorPanel: React.FC = () => {
             </React.Suspense>
           </InspectorTabErrorBoundary>
         </Section>
-        {selectedClipIds.length > 1 ? (
+        {lockedGroupSelection ? (
+          <GroupSelectionSummary group={lockedGroupSelection} clipCount={selectedClipIds.length} />
+        ) : selectedClipIds.length > 1 ? (
           <MultiClipInspector clipIds={selectedClipIds} />
         ) : selectedClip ? (
           <InspectorTabErrorBoundary key={clipId}>
@@ -1420,5 +1431,11 @@ export const InspectorPanel: React.FC = () => {
     </div>
   );
 };
+
+export const InspectorPanel: React.FC = () => (
+  <HostInspectorTabs>
+    <NativeInspectorPanel />
+  </HostInspectorTabs>
+);
 
 export default InspectorPanel;

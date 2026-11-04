@@ -5,6 +5,7 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
 import { Check, ChevronRight, Circle } from "lucide-react"
 
 import { cn } from "@openreel/ui/lib/utils"
+import { usePortalContainer } from "@openreel/ui/lib/portal-container"
 
 const DropdownMenu = DropdownMenuPrimitive.Root
 
@@ -46,7 +47,7 @@ const DropdownMenuSubContent = React.forwardRef<
   <DropdownMenuPrimitive.SubContent
     ref={ref}
     className={cn(
-      "z-[9999] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      "z-[var(--z-popup,9999)] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
       className
     )}
     {...props}
@@ -57,19 +58,22 @@ DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayNam
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
+>(({ className, sideOffset = 4, ...props }, ref) => {
+  const container = usePortalContainer()
+  return (
+  <DropdownMenuPrimitive.Portal container={container}>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-[9999] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "z-[var(--z-popup,9999)] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className
       )}
       {...props}
     />
   </DropdownMenuPrimitive.Portal>
-))
+  )
+})
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName
 
 const DropdownMenuItem = React.forwardRef<

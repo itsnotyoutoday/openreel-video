@@ -178,7 +178,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
           />
         }
         content={
-          <LayoutContent className="flex h-[70vh] flex-col overflow-hidden p-0">
+          <LayoutContent className="flex h-[min(70vh,calc(100dvh-10rem))] flex-col overflow-hidden p-0">
         <div className="border-b border-border p-2">
           <ToolcraftSegmentedControl<"export" | "import">
             ariaLabel="Project JSON mode"

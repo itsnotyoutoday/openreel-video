@@ -36,7 +36,7 @@ export const Playhead: React.FC<PlayheadProps> = ({
           left: -7,
           width: 15,
           height: 13,
-          background: "#1d1d1f",
+          background: "var(--playhead)",
           borderRadius: "3px 3px 0 0",
           clipPath: "polygon(0 0,100% 0,100% 65%,50% 100%,0 65%)",
         }}
@@ -49,7 +49,7 @@ export const Playhead: React.FC<PlayheadProps> = ({
           bottom: 0,
           left: 0,
           width: "1px",
-          background: "#1d1d1f",
+          background: "var(--playhead)",
         }}
       />
     </div>

@@ -1,4 +1,5 @@
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import { getMissingExportMedia } from "@openreel/core";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   X,
   Settings,
@@ -20,7 +21,19 @@ import {
 import { ExportDialog } from "./ExportDialog";
 import { CompressDialog } from "./CompressDialog";
 import { deriveSourceExportMatch } from "../../services/export-source-match";
-import { useExportRunner, extForFormat, exportFilename, type ExportDeliveryMode } from "../../services/export-runner";
+import {
+  useExportRunner,
+  extForFormat,
+  exportFilename,
+  createCaptureWritable,
+  mimeForExt,
+  type ExportDeliveryMode,
+} from "../../services/export-runner";
+import { useHostRuntime } from "../../embed/host-runtime";
+import { importRecordedFile } from "../../embed/host-assets";
+import { useChromeHidden, useHostLabel, useHostState } from "../../embed/host-state";
+import { runExportTarget, splitExportTargets, targetVideoSettings } from "../../embed/export-targets";
+import type { HostExportTarget } from "../../embed/types";
 import { ScreenRecorder } from "./ScreenRecorder";
 import { HistoryPanel } from "./inspector/HistoryPanel";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -64,6 +77,18 @@ export const Toolbar: React.FC = () => {
     useUIStore.getState().openModal("export");
   }, []);
   const aiMode = useUIStore((s) => s.panels.agentChat?.visible ?? false);
+  const hideHeader = useChromeHidden("header");
+  const hideAiPanel = useChromeHidden("aiPanel");
+  const hideProjectArea = useChromeHidden("projectMenu");
+  const hideExport = useChromeHidden("export");
+  const hideSaveState = useChromeHidden("saveState");
+  const exportLabel = useHostLabel("export", "Export");
+  const savedLabel = useHostLabel("save", "Saved!");
+  // editor.openExport(): the primary host target when there are targets, otherwise the export dialog
+  const exportRequest = useHostState((state) => state.exportRequest);
+  const handledExportRequest = useRef(exportRequest);
+  const manualLabel = useHostLabel("manual", "Manual");
+  const aiEditingLabel = useHostLabel("aiEditing", "AI editing");
   const [isCompressOpen, setIsCompressOpen] = useState(false);
   const importMedia = useProjectStore((state) => state.importMedia);
   const sourceMatch = useMemo(() => deriveSourceExportMatch(project), [project]);
@@ -105,12 +130,65 @@ export const Toolbar: React.FC = () => {
     runAudioExport,
     showSavePicker,
     markComplete,
+    reportProgress,
     beginExport,
     finishExportSoon,
     failExport,
     cancel: handleCancelExport,
     resetError,
   } = useExportRunner({ project, onExported: handleExported });
+
+  // Host-owned export actions (embedded mode only).
+  const hostRuntime = useHostRuntime();
+  const hostTargets = hostRuntime?.options.exportTargets;
+  const hostExportsOnly = hostRuntime?.options.hostChrome?.exportAction === "host";
+  const split = useMemo(() => splitExportTargets(hostTargets ?? []), [hostTargets]);
+  const targetAbort = useRef<AbortController | null>(null);
+
+  const runHostTarget = useCallback(
+    async (target: HostExportTarget) => {
+      if (!hasTimelineContent) return;
+      setIsExportOpen(false);
+      const controller = new AbortController();
+      targetAbort.current = controller;
+      try {
+        await runExportTarget(
+          target,
+          {
+            begin: () => {
+              beginExport();
+              reportProgress(0, "Preparing");
+            },
+            render: async (t) => {
+              const current = useProjectStore.getState().getFullProject();
+              const { settings, ext } = targetVideoSettings(t.settings, current);
+              const filename = exportFilename(current.name, ext);
+              const mimeType = mimeForExt(ext);
+              const capture = createCaptureWritable(filename, mimeType);
+              await runExport(settings, ext, capture.writable, { progressRange: [0, 0.7], holdOpen: true });
+              return { blob: await capture.blob, filename, mimeType, project: current };
+            },
+            report: reportProgress,
+            complete: (message) => {
+              markComplete(message);
+              finishExportSoon();
+            },
+          },
+          controller.signal,
+        );
+      } catch (error) {
+        failExport(error);
+      } finally {
+        if (targetAbort.current === controller) targetAbort.current = null;
+      }
+    },
+    [hasTimelineContent, beginExport, reportProgress, runExport, markComplete, finishExportSoon, failExport],
+  );
+
+  const cancelExport = useCallback(() => {
+    targetAbort.current?.abort();
+    handleCancelExport();
+  }, [handleCancelExport]);
 
   const [deviceProfile, setDeviceProfile] = useState<DeviceProfile | null>(null);
   const [exportEstimates, setExportEstimates] = useState<Map<string, TimeEstimate>>(new Map());
@@ -266,6 +344,27 @@ export const Toolbar: React.FC = () => {
   );
 
 
+  // hostActions.record: the host takes a finished recording (to its own storage) and may hand back the file to import.
+  const hostRecord = useHostRuntime()?.options.hostActions?.record;
+  const importRecording = useCallback(
+    (file: File) => importRecordedFile(file, hostRecord, importMedia),
+    [hostRecord, importMedia],
+  );
+
+  // "Relink the original media before exporting": it no longer applies once nothing is missing
+  const exportError = exportState.error;
+  useEffect(() => {
+    if (!exportError?.startsWith("Relink the original media")) return;
+    if (getMissingExportMedia(project).length === 0) resetError();
+  }, [exportError, project, resetError]);
+
+  useEffect(() => {
+    if (exportRequest === handledExportRequest.current) return;
+    handledExportRequest.current = exportRequest;
+    if (split.primary) void runHostTarget(split.primary);
+    else openExportDialog();
+  }, [exportRequest, split.primary, runHostTarget, openExportDialog]);
+
   const handleRecordingComplete = useCallback(
     async (screenBlob: Blob, webcamBlob?: Blob) => {
       if (!screenBlob || screenBlob.size === 0) {
@@ -286,7 +385,7 @@ export const Toolbar: React.FC = () => {
       const screenFile = new File([screenBlob], `Screen_${timestamp}.webm`, {
         type: screenBlob.type || "video/webm",
       });
-      const screenResult = await importMedia(screenFile);
+      const screenResult = await importRecording(screenFile);
       if (screenResult.success) {
         importCount++;
       } else {
@@ -299,7 +398,7 @@ export const Toolbar: React.FC = () => {
         const webcamFile = new File([webcamBlob], `Webcam_${timestamp}.webm`, {
           type: webcamBlob.type || "video/webm",
         });
-        const webcamResult = await importMedia(webcamFile);
+        const webcamResult = await importRecording(webcamFile);
         if (webcamResult.success) {
           importCount++;
         } else {
@@ -320,7 +419,7 @@ export const Toolbar: React.FC = () => {
         toast.error("Import failed", errors.join(". "));
       }
     },
-    [importMedia],
+    [importRecording],
   );
 
   const projectRes = `${project.settings.width}×${project.settings.height}`;
@@ -380,15 +479,21 @@ export const Toolbar: React.FC = () => {
   ];
 
   return (
-    <header className="h-[60px] flex items-center gap-2 px-2 sm:gap-[18px] sm:px-[18px] bg-bg-1 border-b border-border shrink-0 z-30 relative">
+    <header
+      className="h-[60px] flex items-center gap-2 px-2 sm:gap-[18px] sm:px-[18px] bg-bg-1 border-b border-border shrink-0 z-30 relative"
+      // hostChrome.hide "header": the bar collapses but its dialogs (export, recorder, settings) stay mounted
+      style={hideHeader ? { height: 0, minHeight: 0, padding: 0, border: 0, overflow: "visible" } : undefined}
+      data-header-hidden={hideHeader ? "true" : undefined}
+    >
+      <div style={{ display: hideHeader ? "none" : "contents" }}>
 
-      <div role="group" aria-label="Editing mode" className="flex shrink-0 rounded-lg bg-bg-3 p-1 text-xs">
-        <button type="button" aria-pressed={!aiMode} className={`rounded-md px-3 py-1.5 ${!aiMode ? "bg-bg-1 text-fg" : "text-fg-muted"}`} onClick={() => useUIStore.getState().setPanelVisible("agentChat", false)}>Manual</button>
-        <button type="button" aria-pressed={aiMode} className={`rounded-md px-3 py-1.5 ${aiMode ? "bg-accent-soft text-accent" : "text-fg-muted"}`} onClick={() => useUIStore.getState().setPanelVisible("agentChat", true)}>AI editing</button>
-      </div>
+      {!hideAiPanel && <div role="group" aria-label="Editing mode" className="flex shrink-0 rounded-lg bg-bg-3 p-1 text-xs">
+        <button type="button" aria-pressed={!aiMode} className={`rounded-md px-3 py-1.5 ${!aiMode ? "bg-bg-1 text-fg" : "text-fg-muted"}`} onClick={() => useUIStore.getState().setPanelVisible("agentChat", false)}>{manualLabel}</button>
+        <button type="button" aria-pressed={aiMode} className={`rounded-md px-3 py-1.5 ${aiMode ? "bg-accent-soft text-accent" : "text-fg-muted"}`} onClick={() => useUIStore.getState().setPanelVisible("agentChat", true)}>{aiEditingLabel}</button>
+      </div>}
 
       {/* ─── Center: project name ─────────────────────────────── */}
-      <div className="flex flex-1 min-w-0 items-center justify-center gap-1.5">
+      {hideProjectArea ? <div className="flex-1" /> : <div className="flex flex-1 min-w-0 items-center justify-center gap-1.5">
         <div className="hidden sm:block min-w-0">
         <ToolcraftTextInputControl
           label="Project name"
@@ -409,15 +514,15 @@ export const Toolbar: React.FC = () => {
         />
         </div>
         <ProjectSwitcher />
-      </div>
+      </div>}
 
       {/* ─── Right: export only ───────────────────────────────── */}
       <div className="flex items-center justify-end shrink-0">
         {/* Export */}
-        {exportState.isExporting ? (
+        {hideExport ? null : exportState.isExporting ? (
           <button
             type="button"
-            onClick={handleCancelExport}
+            onClick={cancelExport}
             className="flex items-center gap-1.5 rounded-[8px] bg-bg-3 px-[18px] py-[9px] text-[13px] font-semibold text-fg-2"
           >
             <Icon name="square.and.arrow.up" size={13} ariaHidden />
@@ -433,25 +538,35 @@ export const Toolbar: React.FC = () => {
             <span className="truncate">{exportState.error}</span>
             <Icon name="xmark" size={11} ariaHidden />
           </button>
-        ) : exportState.complete ? (
+        ) : exportState.complete && !hideSaveState ? (
           <button
             type="button"
             disabled
             className="flex items-center gap-1.5 rounded-[8px] bg-bg-3 px-[18px] py-[9px] text-[13px] font-semibold text-fg-2"
           >
             <Icon name="checkmark" size={13} ariaHidden />
-            Saved!
+            <span className="max-w-[260px] truncate">{exportState.phase || savedLabel}</span>
           </button>
         ) : (
           <div className="flex items-stretch">
             <button
               type="button"
-              onClick={openExportDialog}
+              onClick={
+                split.primary
+                  ? () => void runHostTarget(split.primary!)
+                  : hostExportsOnly
+                    ? () => void handleExport("mp4")
+                    : openExportDialog
+              }
               disabled={!hasTimelineContent}
-              title={hasTimelineContent ? "Choose export settings" : "Add media or text to the timeline to export"}
+              title={
+                hasTimelineContent
+                  ? (split.primary?.description ?? "Choose export settings")
+                  : "Add media or text to the timeline to export"
+              }
               className="rounded-l-[8px] rounded-r-none bg-accent px-[18px] py-[9px] text-[13px] font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Export
+              {split.primary?.label ?? exportLabel}
             </button>
             <DropdownMenu
               isMenuOpen={isExportOpen}
@@ -488,6 +603,35 @@ export const Toolbar: React.FC = () => {
               menuWidth={288}
             >
               <div className="space-y-1 max-h-[400px] overflow-y-auto">
+                {split.primary ? (
+                  <>
+                    {split.groups.map(({ group, items }) => (
+                      <div key={group} role="group" aria-label={group === "other" ? "Other formats" : group}>
+                        <Text type="supporting" color="secondary" display="block" className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide">
+                          {group === "other" ? "Other formats" : group}
+                        </Text>
+                        {items.map((target) => (
+                          <DropdownMenuItem
+                            key={target.id}
+                            icon={<Icon name="square.and.arrow.up" size={18} ariaHidden />}
+                            label={target.label}
+                            description={target.description}
+                            onClick={() => void runHostTarget(target)}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                    {split.groups.length > 0 && <div className="my-1 border-t border-border" />}
+                    <DropdownMenuItem
+                      icon={<Settings size={18} aria-hidden />}
+                      label="Custom export..."
+                      description="Full settings with AI upscaling"
+                      endContent={<MoreHorizontal size={14} className="text-fg-muted" aria-hidden />}
+                      onClick={openExportDialog}
+                    />
+                  </>
+                ) : (
+                <>
                 {exportOptions.map((option, index) =>
                   option.separator ? (
                     <div key={`sep-${index}`} className="my-1 border-t border-border" />
@@ -543,6 +687,8 @@ export const Toolbar: React.FC = () => {
                   description="Shrink any video to a target size"
                   onClick={() => setIsCompressOpen(true)}
                 />
+                </>
+                )}
               </div>
               <Text type="supporting" color="secondary" display="block" className="border-t border-border bg-bg-2 px-3 py-2.5 text-center text-xs">
                 {project.settings.width}×{project.settings.height} •{" "}
@@ -551,6 +697,8 @@ export const Toolbar: React.FC = () => {
             </DropdownMenu>
           </div>
         )}
+      </div>
+
       </div>
 
       {/* ─── Auxiliary popups & dialogs ───────────────────────── */}

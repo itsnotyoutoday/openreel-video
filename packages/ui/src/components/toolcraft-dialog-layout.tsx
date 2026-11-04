@@ -30,11 +30,11 @@ export function ToolcraftDialog({
       <DialogContent
         hideCloseButton
         className={cn(
-          "!p-0 gap-0 overflow-hidden border-border bg-bg-1 text-fg shadow-xl",
+          "!p-0 gap-0 overflow-hidden border-border bg-bg-1 text-fg shadow-xl max-h-[calc(100dvh-2rem)]",
           className,
         )}
         style={{
-          maxWidth: toCssSize(width),
+          maxWidth: `min(${toCssSize(width)}, calc(100vw - 24px))`,
           width: "calc(100vw - 32px)",
         }}
       >
@@ -118,7 +118,7 @@ export function ToolcraftLayout({
   header,
 }: ToolcraftLayoutProps) {
   return (
-    <div className={cn("flex max-h-[90vh] min-h-0 flex-col", className)}>
+    <div className={cn("flex max-h-[min(90vh,calc(100dvh-2rem))] min-h-0 flex-col", className)}>
       {header}
       {content ?? children}
       {footer}

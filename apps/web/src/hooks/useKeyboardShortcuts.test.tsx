@@ -5,6 +5,8 @@ import type { UIState } from "../stores/ui-store";
 import { useTimelineStore } from "../stores/timeline-store";
 import { keyboardShortcuts } from "../services/keyboard-shortcuts";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
+import { HostRuntimeContext, type HostRuntime } from "../embed/host-runtime";
+import type { ReactNode } from "react";
 
 const mocks = vi.hoisted(() => ({
   projectState: vi.fn(),
@@ -213,3 +215,111 @@ describe("keyboard editing commands", () => {
     view.unmount();
   });
 });
+
+describe("keyboard shortcut scope", () => {
+  const hostWrapper = (root: HTMLElement) => ({ children }: { children: ReactNode }) => {
+    const runtime: HostRuntime = { options: {}, root, getProject: () => ({}) as never };
+    return <HostRuntimeContext.Provider value={runtime}>{children}</HostRuntimeContext.Provider>;
+  };
+
+  it("an embedded editor ignores keys pressed outside its root (a stray 't' adds no title)", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const view = renderHook(useKeyboardShortcuts, { wrapper: hostWrapper(root) });
+
+    press("t");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.insertOverlay).not.toHaveBeenCalled();
+
+    act(() => root.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true })));
+    await waitFor(() => expect(mocks.insertOverlay).toHaveBeenCalledOnce());
+    view.unmount();
+    root.remove();
+  });
+
+  it("the standalone app (no host runtime) still reacts to window-level keys", async () => {
+    const view = renderHook(useKeyboardShortcuts);
+    press("t");
+    await waitFor(() => expect(mocks.insertOverlay).toHaveBeenCalledOnce());
+    view.unmount();
+  });
+
+  it("clears the scope on unmount", () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const view = renderHook(useKeyboardShortcuts, { wrapper: hostWrapper(root) });
+    view.unmount();
+    const standalone = renderHook(useKeyboardShortcuts);
+    press("t");
+    expect(mocks.insertOverlay).toHaveBeenCalledOnce();
+    standalone.unmount();
+    root.remove();
+  });
+});
+
+describe("shuttle keys in the editor", () => {
+  const key = (type: "keydown" | "keyup", name: string, repeat = false) =>
+    act(() => { window.dispatchEvent(new KeyboardEvent(type, { key: name, repeat, bubbles: true, cancelable: true })); });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useTimelineStore.setState({ playbackState: "stopped", playbackRate: 1, playheadPosition: 0 });
+  });
+
+  it("L plays at 1x then 2x, and K pauses and restores the speed", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    key("keydown", "l");
+    expect(useTimelineStore.getState()).toMatchObject({ playbackState: "playing", playbackRate: 1 });
+    key("keydown", "l");
+    expect(useTimelineStore.getState().playbackRate).toBe(2);
+    key("keydown", "k");
+    key("keyup", "k");
+    expect(useTimelineStore.getState()).toMatchObject({ playbackState: "paused", playbackRate: 1 });
+    view.unmount();
+  });
+
+  it("J moves the playhead backwards frame by frame", () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    act(() => useTimelineStore.setState({ playheadPosition: 4 }));
+    const view = renderHook(useKeyboardShortcuts);
+    key("keydown", "j");
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(useTimelineStore.getState().playheadPosition).toBeLessThan(3.8);
+    expect(useTimelineStore.getState().playbackState).not.toBe("playing");
+    key("keydown", "k");
+    const stopped = useTimelineStore.getState().playheadPosition;
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(useTimelineStore.getState().playheadPosition).toBe(stopped);
+    view.unmount();
+  });
+
+  it("with K held, a tap on L steps one frame", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    act(() => useTimelineStore.setState({ playheadPosition: 1 }));
+    key("keydown", "k");
+    key("keydown", "l");
+    key("keyup", "l");
+    expect(useTimelineStore.getState().playheadPosition).toBeCloseTo(1 + 1 / 30, 5);
+    key("keyup", "k");
+    view.unmount();
+  });
+
+  it("a shuttle in progress stops when the editor unmounts", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    key("keydown", "l");
+    view.unmount();
+    expect(useTimelineStore.getState().playbackState).toBe("paused");
+    expect(useTimelineStore.getState().playbackRate).toBe(1);
+  });
+
+  it("is inactive while typing in a text field", () => {
+    const view = renderHook(useKeyboardShortcuts);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true })); });
+    expect(useTimelineStore.getState().playbackState).not.toBe("playing");
+    view.unmount();
+    input.remove();
+  });
+});
+

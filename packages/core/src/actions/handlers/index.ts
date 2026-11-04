@@ -1,5 +1,8 @@
 import "./clip-fx";
 import "./clip-timing";
+import "./clip-host";
+import "./groups";
+import "./locks";
 import "./bulk-set";
 import "./overlay";
 import "./motion";

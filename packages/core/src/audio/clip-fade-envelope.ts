@@ -23,6 +23,12 @@ export function getClipFadeEnvelopePoints({ clipOffset, rangeDuration, clipDurat
   if (fadeIn > rangeStart && fadeIn < rangeEnd) boundaries.push(fadeIn);
   const fadeOutStart = clipDuration - fadeOut;
   if (fadeOutStart > rangeStart && fadeOutStart < rangeEnd) boundaries.push(fadeOutStart);
+  // When the fades overlap, the envelope is the lower of two ramps and peaks where
+  // they cross; without a point there the line between the corners undershoots.
+  if (fadeIn > 0 && fadeOut > 0 && fadeIn + fadeOut > clipDuration) {
+    const crossing = (clipDuration * fadeIn) / (fadeIn + fadeOut);
+    if (crossing > rangeStart && crossing < rangeEnd) boundaries.push(crossing);
+  }
   return Array.from(new Set(boundaries))
     .sort((left, right) => left - right)
     .map((time) => ({

@@ -42,6 +42,39 @@ describe("browser AI media and effect tools", () => {
     expect(EDITING_SYSTEM).toContain("mediaId is not a clipId");
   });
 
+  it("exposes remove_track, add_audio_automation and the transition audioFade parameter", () => {
+    const tools = editingToolDefs("openai").map((definition) => (definition as { function: { name: string; parameters: EditSchema } }).function);
+    const byName = (name: string) => tools.find((tool) => tool.name === name)?.parameters;
+    expect(byName("remove_track")?.required).toEqual(["trackId"]);
+    expect(byName("add_audio_automation")?.required).toEqual(["clipId", "points"]);
+    expect(byName("add_transition")?.properties!.params.properties!.audioFade.type).toBe("boolean");
+  });
+
+  it("removes a track and adds audio automation through the agent tools, with undo", async () => {
+    const session = new EditingSession(); session.beginTransaction();
+    const { trackId, clipId } = await addFixtureClip(session);
+    const points = [{ time: 0, value: 1 }, { time: 1, value: 0.25 }];
+    data(await executeEditingTool("add_audio_automation", { clipId, points }, session));
+    const clipOf = () => session.getProject().timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === clipId);
+    expect(clipOf()?.automation?.volume).toEqual(points);
+
+    const rejected = await executeEditingTool("add_audio_automation", { clipId, points: [{ time: 0, value: 9 }] }, session);
+    expect(rejected.ok).toBe(false);
+
+    data(await executeEditingTool("remove_track", { trackId }, session));
+    expect(session.getProject().timeline.tracks.some((track) => track.id === trackId)).toBe(false);
+  });
+
+  it("accepts audioFade on transitions", async () => {
+    const session = new EditingSession(); session.beginTransaction();
+    const { trackId } = data(await executeEditingTool("add_track", { trackType: "video" }, session));
+    const first = data(await executeEditingTool("add_clip", { trackId, mediaId: "source-video", startTime: 0, inPoint: 0, outPoint: 4 }, session));
+    const second = data(await executeEditingTool("add_clip", { trackId, mediaId: "source-video", startTime: 4, inPoint: 0, outPoint: 4 }, session));
+    data(await executeEditingTool("add_transition", { clipAId: first.clipId, clipBId: second.clipId, transitionType: "crossfade", duration: 1, params: { audioFade: true } }, session));
+    const transition = session.getProject().timeline.tracks.find((track) => track.id === trackId)?.transitions[0];
+    expect(transition?.params.audioFade).toBe(true);
+  });
+
   it("publishes the same per-effect schemas used by validation", async () => {
     const session = new EditingSession(); session.beginTransaction();
     expect(data(await executeEditingTool("get_capabilities", {}, session)).videoEffectParams).toEqual(VIDEO_EDIT_PARAM_SCHEMAS);

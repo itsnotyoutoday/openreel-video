@@ -79,11 +79,36 @@ export interface AppliedEditingTemplate {
   readonly controlValues?: Record<string, unknown>;
 }
 
+export interface PlaceholderClipInfo {
+  readonly label?: string;
+  /** A still shown on the timeline and in the preview instead of the card. */
+  readonly imageUrl?: string;
+  readonly pattern: "bars" | "hatch";
+  /** 0 to 1, drawn as a strip on the clip. */
+  readonly progress?: number;
+  /**
+   * A low-res proxy or animatic (a video URL) that plays in the preview in place
+   * of the still until the real media replaces the placeholder.
+   */
+  readonly previewUrl?: string;
+}
+
 export interface ClipMetadata {
   readonly templateSource?: EditingTemplateApplicationSource;
   readonly appliedTemplates?: AppliedEditingTemplate[];
   readonly templateManaged?: boolean;
   readonly templateTrackType?: "text" | "graphics";
+  /**
+   * Set while the clip stands in for media that does not exist yet. The clip
+   * itself points at a generated still (a card or the host's image) so preview
+   * and export always have something to draw.
+   */
+  readonly placeholder?: PlaceholderClipInfo;
+  /**
+   * Owned by the embedding host: copied verbatim by split, duplicate, undo,
+   * redo, save and load. The editor never reads it.
+   */
+  readonly host?: Readonly<Record<string, unknown>>;
   readonly [key: string]: unknown;
 }
 
@@ -157,6 +182,23 @@ export interface Clip {
    * Undefined or 0 means the primary/first audio track. */
   readonly audioTrackIndex?: number;
   readonly metadata?: ClipMetadata;
+  /**
+   * The clip group this clip belongs to (see `Project.clipGroups`). Clips of a
+   * locked group move, delete and retime as a unit.
+   */
+  readonly groupId?: string;
+  /**
+   * Per-clip edit locks, honoured by every edit path (drag, keys, AI tools,
+   * actions): `move` refuses moving it in time or to another row, `trim`
+   * refuses trimming, slipping, retiming and splitting it. Set by the person or
+   * the host; kept by split, duplicate, save and load.
+   */
+  readonly locks?: ClipLocks;
+}
+
+export interface ClipLocks {
+  readonly move?: boolean;
+  readonly trim?: boolean;
 }
 
 export interface Effect {

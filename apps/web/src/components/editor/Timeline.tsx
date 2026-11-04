@@ -1,3 +1,4 @@
+import { dropHostAssets, readHostDragAssets } from "../../embed/host-assets";
 import React, {
   useRef,
   useCallback,
@@ -1599,6 +1600,13 @@ export const Timeline: React.FC = () => {
                     snappedTime = playheadPosition;
                   }
                 }
+              }
+
+              // Assets dragged from a host media tab land on a new track here.
+              const hostAssets = readHostDragAssets(e.dataTransfer);
+              if (hostAssets) {
+                void dropHostAssets(hostAssets, undefined, snappedTime);
+                return;
               }
 
               // External OS file drop (e.g. from Windows Explorer)

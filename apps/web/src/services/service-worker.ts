@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { assetUrl, getBasePath } from "../utils/asset-url";
 
 export interface ServiceWorkerStatus {
   supported: boolean;
@@ -61,9 +62,10 @@ class ServiceWorkerManager {
     }
 
     try {
-      const registration = await navigator.serviceWorker.register("/sw.js", {
-        scope: "/",
-      });
+      const registration = await navigator.serviceWorker.register(
+        assetUrl("sw.js"),
+        { scope: getBasePath() },
+      );
 
       this.registration = registration;
 

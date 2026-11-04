@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:lib": "pnpm --filter @openreel/core build:wasm && vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
+    "harness": "node harness/serve.mjs",
+    "test:e2e": "playwright test",
     "preview": "vite preview",
     "deploy": "wrangler pages deploy dist --project-name=openreel",
     "deploy:preview": "wrangler pages deploy dist --project-name=openreel --branch=preview",
@@ -43,6 +46,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.4.6",
     "@testing-library/react": "^16.0.0",
     "@types/react": "^19.2.17",
@@ -64,5 +68,12 @@
     "vite": "^5.3.1",
     "vitest": "^1.6.0",
     "wrangler": "^3.114.17"
+  },
+  "exports": {
+    "./embed": {
+      "types": "./dist-lib/types/apps/web/src/embed/index.d.ts",
+      "import": "./dist-lib/openreel-editor.js"
+    },
+    "./embed.css": "./dist-lib/openreel-editor.css"
   }
 }
